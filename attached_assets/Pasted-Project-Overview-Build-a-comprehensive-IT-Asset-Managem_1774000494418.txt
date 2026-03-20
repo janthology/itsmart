@@ -1,0 +1,226 @@
+Project Overview
+Build a comprehensive IT Asset Management (ITAM) system using Next.js 16, Supabase (PostgreSQL + Auth), and shadcn/ui components. The system supports three user roles (General User, Support Staff, Administrator) with role-based access control at both the application and database (RLS) levels.
+Tech Stack
+
+Frontend: Next.js 16 with React 19 (App Router)
+UI Framework: shadcn/ui components (already available) + Tailwind CSS
+Database: Supabase PostgreSQL with Row-Level Security (RLS)
+Authentication: Supabase Auth
+Storage: Supabase Storage (for asset photos and attachments)
+Client Library: @supabase/supabase-js
+
+Database Schema Setup
+Tables to Create (via migration script):
+
+
+profiles (extends auth.users)
+
+id (UUID, FK to auth.users)
+full_name, role (enum), department
+created_at, updated_at
+
+
+
+assets
+
+id, asset_tag (unique), name, category (enum), status (enum)
+assigned_to (FK to profiles), purchase_date, notes
+created_at, updated_at
+
+
+
+tickets
+
+id, title, description, status (enum), priority (enum)
+asset_id (FK to assets), created_by (FK to profiles), assigned_to (FK to profiles)
+created_at, updated_at, closed_at
+
+
+
+ticket_comments
+
+id, ticket_id (FK), created_by (FK), comment_text
+created_at
+
+
+
+categories (dropdown management)
+
+id, name, type (asset_category or ticket_priority)
+created_at
+
+
+
+RLS Policies:
+
+General Users: Can view only assigned assets, create tickets, see/comment on own tickets
+Support Staff: Can view all assets, manage all tickets (claim, update status, comment)
+Administrators: Full access to all data, manage users and system settings
+
+File Structure
+app/
+├── layout.tsx (updated with Supabase provider)
+├── page.tsx (landing/dashboard)
+├── auth/
+│   ├── login/page.tsx
+│   ├── signup/page.tsx
+│   └── callback/route.ts (OAuth callback)
+├── dashboard/
+│   ├── layout.tsx (authenticated layout)
+│   ├── page.tsx (main dashboard)
+│   ├── assets/
+│   │   ├── page.tsx (asset list)
+│   │   ├── [id]/page.tsx (asset detail)
+│   │   └── new/page.tsx (create asset - admin only)
+│   ├── tickets/
+│   │   ├── page.tsx (ticket list)
+│   │   ├── [id]/page.tsx (ticket detail)
+│   │   └── new/page.tsx (create ticket)
+│   ├── admin/
+│   │   ├── layout.tsx (admin guard)
+│   │   ├── users/page.tsx (user management)
+│   │   ├── categories/page.tsx (dropdown management)
+│   │   └── settings/page.tsx (system settings)
+│   └── profile/page.tsx (user profile)
+├── api/
+│   ├── auth/ (OAuth handlers)
+│   └── (future: server actions)
+lib/
+├── supabase/
+│   ├── client.ts (client-side Supabase)
+│   ├── server.ts (server-side Supabase)
+│   └── middleware.ts (auth middleware)
+├── hooks/
+│   ├── useUser.ts (get current user)
+│   ├── useAssets.ts (asset queries)
+│   └── useTickets.ts (ticket queries)
+└── utils/
+    ├── roles.ts (RBAC helpers)
+    └── validators.ts (Zod schemas)
+components/
+├── layout/
+│   ├── Navbar.tsx
+│   ├── Sidebar.tsx
+│   └── AuthGuard.tsx
+├── assets/
+│   ├── AssetCard.tsx
+│   ├── AssetForm.tsx
+│   ├── AssetTable.tsx
+│   └── AssetDetail.tsx
+├── tickets/
+│   ├── TicketCard.tsx
+│   ├── TicketForm.tsx
+│   ├── TicketTable.tsx
+│   ├── TicketDetail.tsx
+│   └── TicketComments.tsx
+└── admin/
+    ├── UserManagement.tsx
+    ├── CategoryManagement.tsx
+    └── SettingsPanel.tsx
+
+Implementation Phases
+Phase 1: Database & Authentication Setup
+
+Create Supabase migration script for all tables
+Set up RLS policies for each role
+Create Supabase Auth integration
+Set up @supabase/supabase-js client
+
+Phase 2: Core Infrastructure
+
+Update app/layout.tsx with Supabase provider
+Create lib/supabase/client.ts and server.ts
+Create middleware.ts for auth check
+Build AuthGuard component
+Create custom hooks (useUser, useAssets, useTickets)
+
+Phase 3: Authentication Pages
+
+Create auth/login/page.tsx
+Create auth/signup/page.tsx
+Create auth/callback/route.ts (OAuth)
+Create profile/page.tsx
+
+Phase 4: Asset Management
+
+Create dashboard/assets/page.tsx (list with filters)
+Create dashboard/assets/[id]/page.tsx (detail view)
+Create dashboard/assets/new/page.tsx (create - admin only)
+Build AssetCard, AssetForm, AssetTable components
+
+Phase 5: Ticket Management
+
+Create dashboard/tickets/page.tsx (list with status filtering)
+Create dashboard/tickets/[id]/page.tsx (detail view)
+Create dashboard/tickets/new/page.tsx (create ticket)
+Build TicketCard, TicketForm, TicketTable, TicketDetail, TicketComments components
+
+Phase 6: Admin Panel
+
+Create dashboard/admin/users/page.tsx (user management)
+Create dashboard/admin/categories/page.tsx (dropdown management)
+Create dashboard/admin/settings/page.tsx
+Build admin components
+
+Phase 7: Polish & Testing
+
+Add loading states and error boundaries
+Implement toast notifications for user feedback
+Add form validation with Zod
+Responsive design tweaks
+Accessibility improvements
+
+Key Implementation Details
+Authentication Flow:
+
+Supabase Auth (email/password + OAuth optional)
+Session stored in httpOnly cookie
+Middleware checks auth on every request
+Profile enrichment (role, department) from profiles table
+
+RBAC Implementation:
+
+Custom hooks and guards check user.role
+Database RLS enforces server-side security
+Admin-only pages have protective wrapper
+Row filters applied at component level
+
+Data Fetching:
+
+Server Components for initial data load
+React hooks + Supabase client for real-time updates
+SWR or custom hooks for client-side state
+Optimistic updates for better UX
+
+UI/UX:
+
+Consistent use of shadcn/ui components
+Dark/light theme support via next-themes
+Responsive layout with sidebar navigation
+Form validation feedback with react-hook-form + zod
+Toast notifications for actions
+
+Dependencies to Add
+
+@supabase/supabase-js: Supabase client
+@supabase/ssr: Server-side rendering support
+react-hook-form: Form management (already have)
+zod: Schema validation (already have)
+
+Environment Variables Required
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+SUPABASE_SERVICE_ROLE_KEY
+POSTGRES_URL
+
+(All already configured via Supabase integration)
+Success Criteria
+
+✅ Users can authenticate with Supabase
+✅ Role-based access control enforced via RLS
+✅ General users can view assigned assets and create tickets
+✅ Support staff can view all assets and manage tickets
+✅ Admins can manage all data and system settings
+✅ Real-time updates for asset/ticket status changes
+✅ Mobile-responsive design
+✅ Form validation and error handling

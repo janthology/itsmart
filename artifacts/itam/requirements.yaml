@@ -1,0 +1,15 @@
+packages:
+  "recharts": "For dashboard analytics and statistics charts"
+  "framer-motion": "For page transitions and smooth micro-interactions"
+  "react-hook-form": "For robust form state management and validation"
+  "@hookform/resolvers": "For integrating Zod schemas with react-hook-form"
+  "date-fns": "For formatting dates in human-readable formats"
+  "clsx": "For conditional class merging"
+  "tailwind-merge": "For merging Tailwind CSS classes safely"
+  "lucide-react": "For crisp, beautiful iconography"
+
+notes:
+  - Application uses JWT stored in localStorage (key: 'itam_token').
+  - Global fetch interceptor added to inject Authorization header for API calls.
+  - Generous use of shadcn/ui components assumed available from @/components/ui/*.
+  - The Orval generated API hooks are imported from @workspace/api-client-react.

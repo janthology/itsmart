@@ -1,22 +1,30 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: IT Asset Management API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: assets
+    description: Asset management
+  - name: tickets
+    description: Ticket management
+  - name: users
+    description: User management
+  - name: categories
+    description: Category management
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +32,522 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getCurrentUser
+      tags: [auth]
+      summary: Get current user profile
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /assets:
+    get:
+      operationId: getAssets
+      tags: [assets]
+      summary: List all assets
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/AssetStatus"
+        - name: category
+          in: query
+          schema:
+            $ref: "#/components/schemas/AssetCategory"
+        - name: assignedTo
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: number
+      responses:
+        "200":
+          description: List of assets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetListResponse"
+    post:
+      operationId: createAsset
+      tags: [assets]
+      summary: Create a new asset (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetRequest"
+      responses:
+        "201":
+          description: Asset created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+
+  /assets/{id}:
+    get:
+      operationId: getAsset
+      tags: [assets]
+      summary: Get asset by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Asset details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateAsset
+      tags: [assets]
+      summary: Update an asset (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssetRequest"
+      responses:
+        "200":
+          description: Asset updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+    delete:
+      operationId: deleteAsset
+      tags: [assets]
+      summary: Delete an asset (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Asset deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /tickets:
+    get:
+      operationId: getTickets
+      tags: [tickets]
+      summary: List tickets
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketStatus"
+        - name: priority
+          in: query
+          schema:
+            $ref: "#/components/schemas/TicketPriority"
+        - name: assetId
+          in: query
+          schema:
+            type: string
+        - name: assignedTo
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: number
+        - name: limit
+          in: query
+          schema:
+            type: number
+      responses:
+        "200":
+          description: List of tickets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketListResponse"
+    post:
+      operationId: createTicket
+      tags: [tickets]
+      summary: Create a new ticket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTicketRequest"
+      responses:
+        "201":
+          description: Ticket created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+
+  /tickets/{id}:
+    get:
+      operationId: getTicket
+      tags: [tickets]
+      summary: Get ticket by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Ticket details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketWithComments"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateTicket
+      tags: [tickets]
+      summary: Update a ticket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTicketRequest"
+      responses:
+        "200":
+          description: Ticket updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ticket"
+
+  /tickets/{id}/comments:
+    post:
+      operationId: addTicketComment
+      tags: [tickets]
+      summary: Add a comment to a ticket
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommentRequest"
+      responses:
+        "201":
+          description: Comment added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TicketComment"
+
+  /users:
+    get:
+      operationId: getUsers
+      tags: [users]
+      summary: Get all users (admin only)
+      parameters:
+        - name: role
+          in: query
+          schema:
+            $ref: "#/components/schemas/UserRole"
+        - name: department
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserProfile"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+    put:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /users/profile:
+    put:
+      operationId: updateMyProfile
+      tags: [users]
+      summary: Update current user's profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileRequest"
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  /categories:
+    get:
+      operationId: getCategories
+      tags: [categories]
+      summary: Get all categories
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Category"
+    post:
+      operationId: createCategory
+      tags: [categories]
+      summary: Create a category (admin only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryRequest"
+      responses:
+        "201":
+          description: Category created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+
+  /categories/{id}:
+    put:
+      operationId: updateCategory
+      tags: [categories]
+      summary: Update a category (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCategoryRequest"
+      responses:
+        "200":
+          description: Updated category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Category"
+    delete:
+      operationId: deleteCategory
+      tags: [categories]
+      summary: Delete a category (admin only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [assets]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardStats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +558,451 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required:
+        - success
+
+    UserRole:
+      type: string
+      enum:
+        - general_user
+        - support_staff
+        - administrator
+
+    AssetStatus:
+      type: string
+      enum:
+        - available
+        - assigned
+        - in_maintenance
+        - retired
+        - lost
+
+    AssetCategory:
+      type: string
+      enum:
+        - laptop
+        - desktop
+        - monitor
+        - phone
+        - tablet
+        - printer
+        - server
+        - networking
+        - peripheral
+        - other
+
+    TicketStatus:
+      type: string
+      enum:
+        - open
+        - in_progress
+        - on_hold
+        - resolved
+        - closed
+
+    TicketPriority:
+      type: string
+      enum:
+        - low
+        - medium
+        - high
+        - critical
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        department:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - fullName
+        - role
+        - createdAt
+        - updatedAt
+
+    Asset:
+      type: object
+      properties:
+        id:
+          type: string
+        assetTag:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: "#/components/schemas/AssetCategory"
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        assignedTo:
+          $ref: "#/components/schemas/UserProfile"
+          nullable: true
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - assetTag
+        - name
+        - category
+        - status
+        - createdAt
+        - updatedAt
+
+    AssetListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+        total:
+          type: number
+        page:
+          type: number
+        limit:
+          type: number
+      required:
+        - data
+        - total
+        - page
+        - limit
+
+    TicketComment:
+      type: object
+      properties:
+        id:
+          type: string
+        ticketId:
+          type: string
+        commentText:
+          type: string
+        createdBy:
+          $ref: "#/components/schemas/UserProfile"
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - ticketId
+        - commentText
+        - createdBy
+        - createdAt
+
+    Ticket:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        asset:
+          $ref: "#/components/schemas/Asset"
+          nullable: true
+        createdBy:
+          $ref: "#/components/schemas/UserProfile"
+        assignedTo:
+          $ref: "#/components/schemas/UserProfile"
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        closedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - title
+        - description
+        - status
+        - priority
+        - createdBy
+        - createdAt
+        - updatedAt
+
+    TicketWithComments:
+      allOf:
+        - $ref: "#/components/schemas/Ticket"
+        - type: object
+          properties:
+            comments:
+              type: array
+              items:
+                $ref: "#/components/schemas/TicketComment"
+          required:
+            - comments
+
+    TicketListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ticket"
+        total:
+          type: number
+        page:
+          type: number
+        limit:
+          type: number
+      required:
+        - data
+        - total
+        - page
+        - limit
+
+    Category:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - createdAt
+
+    DashboardStats:
+      type: object
+      properties:
+        totalAssets:
+          type: number
+        assignedAssets:
+          type: number
+        availableAssets:
+          type: number
+        inMaintenanceAssets:
+          type: number
+        openTickets:
+          type: number
+        inProgressTickets:
+          type: number
+        resolvedTickets:
+          type: number
+        totalUsers:
+          type: number
+        recentTickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Ticket"
+        recentAssets:
+          type: array
+          items:
+            $ref: "#/components/schemas/Asset"
+      required:
+        - totalAssets
+        - assignedAssets
+        - availableAssets
+        - inMaintenanceAssets
+        - openTickets
+        - inProgressTickets
+        - resolvedTickets
+        - totalUsers
+        - recentTickets
+        - recentAssets
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        fullName:
+          type: string
+        department:
+          type: string
+      required:
+        - email
+        - password
+        - fullName
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: "#/components/schemas/UserProfile"
+        token:
+          type: string
+      required:
+        - user
+        - token
+
+    CreateAssetRequest:
+      type: object
+      properties:
+        assetTag:
+          type: string
+        name:
+          type: string
+        category:
+          $ref: "#/components/schemas/AssetCategory"
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        assignedToId:
+          type: string
+          nullable: true
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      required:
+        - assetTag
+        - name
+        - category
+        - status
+
+    UpdateAssetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        category:
+          $ref: "#/components/schemas/AssetCategory"
+        status:
+          $ref: "#/components/schemas/AssetStatus"
+        assignedToId:
+          type: string
+          nullable: true
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    CreateTicketRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        assetId:
+          type: string
+          nullable: true
+      required:
+        - title
+        - description
+        - priority
+
+    UpdateTicketRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          $ref: "#/components/schemas/TicketStatus"
+        priority:
+          $ref: "#/components/schemas/TicketPriority"
+        assignedToId:
+          type: string
+          nullable: true
+
+    CreateCommentRequest:
+      type: object
+      properties:
+        commentText:
+          type: string
+      required:
+        - commentText
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        department:
+          type: string
+          nullable: true
+
+    UpdateProfileRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        department:
+          type: string
+          nullable: true
