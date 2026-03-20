@@ -27,3 +27,11 @@ timeoutMs = 20000
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+SUPABASE_HOST = "db.wngurnuozjzzdhveegjz.supabase.co"
+SUPABASE_DB_USER = "postgres"
+SUPABASE_DB_NAME = "postgres"
+SUPABASE_DB_PORT = "5432"
