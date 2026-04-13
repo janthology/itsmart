@@ -1,39 +1,162 @@
 import { useState } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetTicket, useUpdateTicket, useAddTicketComment, TicketStatus, TicketPriority } from "@workspace/api-client-react";
+import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useSubmitSatisfactionRating, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, ArrowLeft, Send, MessageSquare, Clock, ShieldAlert, MonitorSmartphone } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Loader2, ArrowLeft, Send, MessageSquare, Clock, ShieldAlert, MonitorSmartphone, UserCheck, AlertTriangle, Star } from "lucide-react";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { SLABadge } from "@/components/ui/sla-badge";
+
+type Role = 'administrator' | 'support_staff' | 'general_user';
+
+const STATUS_LABEL: Record<string, string> = {
+  open: 'Open',
+  in_progress: 'In Progress',
+  on_hold: 'On Hold',
+  resolved: 'Resolved',
+  closed: 'Closed',
+};
+
+// Statuses that require a remarks dialog before applying
+const REQUIRES_REMARKS = new Set(['on_hold', 'resolved', 'closed']);
+
+const PRIORITY_RANK: Record<string, number> = {
+  critical: 1, high: 2, medium: 3, low: 4,
+};
+const PRIORITY_LABEL: Record<string, string> = {
+  critical: 'Critical - 1', high: 'High - 2', medium: 'Medium - 3', low: 'Low - 4',
+};
+
+function getAllowedTransitions(current: string, role: Role): string[] {
+  if (role === 'administrator') {
+    const map: Record<string, string[]> = {
+      open:        ['in_progress', 'closed'],
+      in_progress: ['open', 'on_hold', 'resolved'],
+      on_hold:     ['in_progress', 'open'],
+      resolved:    ['in_progress', 'closed'],
+      closed:      [],
+    };
+    return map[current] ?? [];
+  }
+  if (role === 'support_staff') {
+    const map: Record<string, string[]> = {
+      open:        ['in_progress', 'closed'],
+      in_progress: ['open', 'on_hold', 'resolved'],
+      on_hold:     ['in_progress'],
+      resolved:    ['in_progress'],
+      closed:      [],
+    };
+    return map[current] ?? [];
+  }
+  // general_user
+  const map: Record<string, string[]> = {
+    resolved: ['in_progress', 'closed'],
+  };
+  return map[current] ?? [];
+}
 
 export default function TicketDetail() {
   const [, params] = useRoute("/tickets/:id");
   const id = params?.id || "";
   const { user } = useAuth();
-  const canManage = user?.role === 'administrator' || user?.role === 'support_staff';
+  const isAdmin = user?.role === 'administrator';
+  const isSupport = user?.role === 'support_staff';
+  const canManage = isAdmin || isSupport;
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const { data: ticket, isLoading, isError } = useGetTicket(id);
   const updateMutation = useUpdateTicket();
   const commentMutation = useAddTicketComment();
+  const { data: supportStaff } = useGetSupportStaff();
+  const satisfactionMutation = useSubmitSatisfactionRating();
 
   const [commentText, setCommentText] = useState("");
+  const [hoverRating, setHoverRating] = useState(0);
+  const [selectedRating, setSelectedRating] = useState(0);
+  const [satisfactionComment, setSatisfactionComment] = useState("");
 
-  const handleStatusChange = async (newStatus: string) => {
+  // Remarks/confirm dialog state
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+  const [remarksText, setRemarksText] = useState("");
+
+  // Priority confirmation state
+  const [pendingPriority, setPendingPriority] = useState<string | null>(null);
+
+  // Called when user picks a new status from the dropdown
+  const handleStatusSelect = (newStatus: string) => {
+    if (REQUIRES_REMARKS.has(newStatus)) {
+      setPendingStatus(newStatus);
+      setRemarksText("");
+    } else {
+      applyStatusChange(newStatus, null);
+    }
+  };
+
+  // Actually commits the status change + logs comment
+  const applyStatusChange = async (newStatus: string, remarks: string | null) => {
     try {
-      await updateMutation.mutateAsync({ id, data: { status: newStatus as TicketStatus } });
-      toast({ title: "Status updated", description: "Ticket status has been changed." });
-      queryClient.invalidateQueries({ queryKey: [`/api/tickets/${id}`] });
+      const updates: any = { status: newStatus as TicketStatus };
+      if (newStatus === 'open') updates.assignedToId = null;
+      await updateMutation.mutateAsync({ id, data: updates });
+
+      let remark = newStatus === 'open' && ticket?.assignedTo
+        ? `🔄 Status changed to "${STATUS_LABEL[newStatus]}" by ${user?.fullName ?? 'Unknown'}. Ticket unassigned.`
+        : `🔄 Status changed to "${STATUS_LABEL[newStatus] ?? newStatus}" by ${user?.fullName ?? 'Unknown'}.`;
+      if (remarks?.trim()) remark += `\n\n📝 Remarks: ${remarks.trim()}`;
+
+      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
+      toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update status." });
+    } finally {
+      setPendingStatus(null);
+      setRemarksText("");
+    }
+  };
+
+  const handleAssign = async (assigneeId: string | null) => {
+    try {
+      const updates: any = { assignedToId: assigneeId };
+      if (assigneeId && ticket?.status === 'open') updates.status = 'in_progress' as TicketStatus;
+      if (!assigneeId && ticket?.status === 'in_progress') updates.status = 'open' as TicketStatus;
+      await updateMutation.mutateAsync({ id, data: updates });
+
+      const assigneeName = assigneeId
+        ? (supportStaff?.find(s => s.id === assigneeId)?.fullName ?? (user?.id === assigneeId ? user?.fullName : 'Unknown'))
+        : null;
+      const remark = assigneeId
+        ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}. Status set to "in progress".`
+        : `🔓 Ticket unassigned by ${user?.fullName ?? 'Unknown'}. Status reverted to "open".`;
+      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
+      toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Error", description: "Failed to assign ticket." });
+    }
+  };
+
+  const applyPriorityChange = async () => {
+    if (!pendingPriority) return;
+    const oldPriority = ticket?.priority ?? '';
+    const newPriority = pendingPriority;
+    setPendingPriority(null); // close immediately
+    try {
+      await updateMutation.mutateAsync({ id, data: { priority: newPriority as any } });
+      await commentMutation.mutateAsync({ id, data: {
+        commentText: `${PRIORITY_RANK[newPriority] < PRIORITY_RANK[oldPriority] ? '⬆️' : '⬇️'} Priority changed from "${PRIORITY_LABEL[oldPriority]}" to "${PRIORITY_LABEL[newPriority]}" by ${user?.fullName ?? 'Unknown'}.`
+      }});
+      toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
+    } catch {
+      toast({ variant: "destructive", title: "Error", description: "Failed to update priority." });
     }
   };
 
@@ -48,8 +171,20 @@ export default function TicketDetail() {
     }
   };
 
+  const handleSubmitRating = async () => {
+    if (!selectedRating) return;
+    try {
+      await satisfactionMutation.mutateAsync({ id, rating: selectedRating, comment: satisfactionComment || undefined });
+      toast({ title: "Thank you!", description: "Your feedback has been submitted." });
+    } catch {
+      toast({ variant: "destructive", title: "Error", description: "Failed to submit rating." });
+    }
+  };
+
   if (isLoading) return <AppLayout><div className="flex h-64 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div></AppLayout>;
   if (isError || !ticket) return <AppLayout><div className="text-center p-8 text-destructive">Ticket not found.</div></AppLayout>;
+
+  const isClosing = pendingStatus === 'closed';
 
   return (
     <AppLayout>
@@ -58,15 +193,77 @@ export default function TicketDetail() {
           <ArrowLeft className="w-4 h-4 mr-2" /> Back to Tickets
         </Link>
 
+        {/* Priority Confirmation Dialog */}
+        <Dialog open={!!pendingPriority} onOpenChange={(open) => { if (!open) setPendingPriority(null); }}>
+          <DialogContent className="sm:max-w-[400px] rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="font-display">Change Priority?</DialogTitle>
+              <DialogDescription>
+                Change priority from <span className="font-medium">{PRIORITY_LABEL[ticket.priority]}</span> to <span className="font-medium">{pendingPriority ? PRIORITY_LABEL[pendingPriority] : ''}</span>? This will be logged in the activity log.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2 pt-2">
+              <Button variant="outline" className="rounded-xl" onClick={() => setPendingPriority(null)}>Cancel</Button>
+              <Button
+                className="rounded-xl"
+                disabled={updateMutation.isPending || commentMutation.isPending}
+                onClick={applyPriorityChange}
+              >
+                {(updateMutation.isPending || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Confirm
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={!!pendingStatus} onOpenChange={(open) => { if (!open) { setPendingStatus(null); setRemarksText(""); } }}>
+          <DialogContent className="sm:max-w-[460px] rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 font-display">
+                {isClosing && <AlertTriangle className="w-5 h-5 text-destructive" />}
+                {isClosing ? 'Close Ticket?' : `Mark as ${STATUS_LABEL[pendingStatus ?? '']}`}
+              </DialogTitle>
+              <DialogDescription>
+                {isClosing
+                  ? 'This action is permanent. Closed tickets cannot be reopened. Please add a reason before confirming.'
+                  : pendingStatus === 'on_hold'
+                  ? 'Describe why this ticket is being put on hold (e.g. waiting on user reply, vendor, hardware delivery).'
+                  : `Add remarks explaining why this ticket is being marked as "${STATUS_LABEL[pendingStatus ?? '']}".`}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-2">
+              <Textarea
+                placeholder={isClosing ? 'Reason for closing (spam, duplicate, resolved, etc.)...' : 'Describe the resolution or current state...'}
+                value={remarksText}
+                onChange={(e) => setRemarksText(e.target.value)}
+                className="rounded-xl min-h-[100px] resize-none"
+                autoFocus
+              />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" className="rounded-xl" onClick={() => { setPendingStatus(null); setRemarksText(""); }}>
+                Cancel
+              </Button>
+              <Button
+                className={`rounded-xl ${isClosing ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''}`}
+                disabled={!remarksText.trim() || updateMutation.isPending || commentMutation.isPending}
+                onClick={() => applyStatusChange(pendingStatus!, remarksText)}
+              >
+                {(updateMutation.isPending || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {isClosing ? 'Confirm Close' : `Mark as ${STATUS_LABEL[pendingStatus ?? '']}`}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
+
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
             <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl overflow-hidden">
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-mono text-muted-foreground">Ticket #{ticket.id.substring(0,8)}</p>
+                    <p className="text-sm font-mono text-muted-foreground">{(ticket as any).ticketNumber ?? `#${ticket.id.substring(0, 8)}`}</p>
                     <CardTitle className="text-2xl font-display leading-tight">{ticket.title}</CardTitle>
                   </div>
                   <div className="flex flex-col gap-2 items-end">
@@ -74,12 +271,23 @@ export default function TicketDetail() {
                     <StatusBadge status={ticket.status} />
                   </div>
                 </div>
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <span className="flex items-center gap-1.5"><Clock className="w-4 h-4" /> Opened {format(new Date(ticket.createdAt), 'MMM d, h:mm a')}</span>
+                <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
+                  <span className="flex items-center gap-1.5"><Clock className="w-4 h-4" /> Opened {format(new Date(ticket.createdAt), 'MMM d, yyyy h:mm a')}</span>
+                  {(ticket as any).resolvedAt && (
+                    <span className="flex items-center gap-1.5 text-green-600 dark:text-green-400"><Clock className="w-4 h-4" /> Resolved {format(new Date((ticket as any).resolvedAt), 'MMM d, yyyy h:mm a')}</span>
+                  )}
+                  {(ticket as any).closedAt && (
+                    <span className="flex items-center gap-1.5 text-muted-foreground"><Clock className="w-4 h-4" /> Closed {format(new Date((ticket as any).closedAt), 'MMM d, yyyy h:mm a')}</span>
+                  )}
                   <span className="flex items-center gap-1.5 px-2 py-1 bg-background rounded-md border border-border/50">
                     <span className="w-5 h-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px]">{ticket.createdBy.fullName.charAt(0)}</span>
                     {ticket.createdBy.fullName}
                   </span>
+                  {(ticket as any).type && (
+                    <span className="px-2 py-1 bg-muted rounded-md border border-border/50 text-xs font-medium">
+                      {TICKET_TYPE_LABEL[(ticket as any).type] ?? (ticket as any).type}
+                    </span>
+                  )}
                 </div>
               </CardHeader>
               <CardContent className="p-8">
@@ -89,71 +297,208 @@ export default function TicketDetail() {
               </CardContent>
             </Card>
 
-            {/* Comments Section */}
-            <div className="space-y-6">
+            {/* Activity Log */}
+            <div className="space-y-4">
               <h3 className="text-lg font-bold font-display flex items-center gap-2">
                 <MessageSquare className="w-5 h-5 text-primary" /> Activity Log
               </h3>
-              
-              <div className="space-y-4">
-                {ticket.comments.map((comment) => (
-                  <Card key={comment.id} className="border-border/50 shadow-sm rounded-xl">
-                    <CardHeader className="py-3 px-4 bg-muted/20 border-b border-border/50 flex flex-row items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center font-bold text-xs">
-                          {comment.createdBy.fullName.charAt(0)}
+              <div className="space-y-2">
+                {ticket.comments.map((comment) => {
+                  // System entries start with an emoji action indicator
+                  const isSystemEntry = /^[🔄👤🔓⬆️⬇️✅📝]/.test(comment.commentText);
+                  if (isSystemEntry) {
+                    return (
+                      <div key={comment.id} className="flex items-start gap-3 px-3 py-2">
+                        <div className="w-px self-stretch bg-border/50 mx-2 shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">{comment.commentText}</p>
+                          <p className="text-[10px] text-muted-foreground/50 mt-0.5">{format(new Date(comment.createdAt), 'MMM d, h:mm a')}</p>
                         </div>
-                        <span className="font-semibold text-sm">{comment.createdBy.fullName}</span>
                       </div>
-                      <span className="text-xs text-muted-foreground">{format(new Date(comment.createdAt), 'MMM d, h:mm a')}</span>
-                    </CardHeader>
-                    <CardContent className="p-4 text-sm whitespace-pre-wrap">
-                      {comment.commentText}
-                    </CardContent>
-                  </Card>
-                ))}
+                    );
+                  }
+                  return (
+                    <Card key={comment.id} className="border-border/50 shadow-sm rounded-xl">
+                      <CardHeader className="py-3 px-4 bg-muted/20 border-b border-border/50 flex flex-row items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-accent/10 text-accent flex items-center justify-center font-bold text-xs">
+                            {comment.createdBy.fullName.charAt(0)}
+                          </div>
+                          <span className="font-semibold text-sm">{comment.createdBy.fullName}</span>
+                        </div>
+                        <span className="text-xs text-muted-foreground">{format(new Date(comment.createdAt), 'MMM d, h:mm a')}</span>
+                      </CardHeader>
+                      <CardContent className="p-4 text-sm whitespace-pre-wrap">{comment.commentText}</CardContent>
+                    </Card>
+                  );
+                })}
               </div>
 
-              <Card className="border-primary/20 shadow-md shadow-primary/5 rounded-xl border-2">
-                <CardContent className="p-4">
-                  <Textarea 
-                    placeholder="Type your reply here..." 
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    className="min-h-[100px] mb-4 border-border/50 focus-visible:ring-primary/20 rounded-lg resize-none"
-                  />
-                  <div className="flex justify-end">
-                    <Button 
-                      onClick={handleAddComment} 
-                      disabled={!commentText.trim() || commentMutation.isPending}
-                      className="rounded-lg shadow-md shadow-primary/20"
-                    >
-                      {commentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                      Send Reply
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              {ticket.status !== 'closed' && (
+                <Card className="border-primary/20 shadow-md shadow-primary/5 rounded-xl border-2">
+                  <CardContent className="p-4">
+                    <Textarea
+                      placeholder="Type your reply here..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      className="min-h-[100px] mb-4 border-border/50 focus-visible:ring-primary/20 rounded-lg resize-none"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        onClick={handleAddComment}
+                        disabled={!commentText.trim() || commentMutation.isPending}
+                        className="rounded-lg shadow-md shadow-primary/20"
+                      >
+                        {commentMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                        Send Reply
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
             </div>
           </div>
 
-          {/* Sidebar Info */}
+          {/* Sidebar */}
           <div className="space-y-6">
-            {canManage && (
+            {/* SLA Card */}
+            <SLABadge
+              variant="full"
+              priority={ticket.priority}
+              createdAt={ticket.createdAt}
+              resolvedAt={(ticket as any).resolvedAt}
+              ticketStatus={ticket.status}
+              totalHoldSeconds={(ticket as any).totalHoldSeconds}
+              onHoldAt={(ticket as any).onHoldAt}
+            />
+
+            {(canManage || (ticket.status === 'resolved' && ticket.createdBy.id === user?.id)) && (
               <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
-                <CardHeader className="border-b border-border/50 py-4 px-6"><CardTitle className="text-base font-display flex items-center gap-2"><ShieldAlert className="w-5 h-5 text-primary" /> Management</CardTitle></CardHeader>
-                <CardContent className="p-6 space-y-4">
-                  <div>
-                    <label className="text-sm font-medium mb-1.5 block text-foreground">Update Status</label>
-                    <Select value={ticket.status} onValueChange={handleStatusChange} disabled={updateMutation.isPending}>
-                      <SelectTrigger className="w-full rounded-xl">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {Object.values(TicketStatus).map(s => <SelectItem key={s} value={s} className="capitalize">{s.replace('_', ' ')}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <CardHeader className="border-b border-border/50 py-4 px-6">
+                  <CardTitle className="text-base font-display flex items-center gap-2">
+                    <ShieldAlert className="w-5 h-5 text-primary" /> Management
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-5">
+                  {ticket.status === 'closed' ? (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/50 bg-muted/30 text-sm text-muted-foreground">
+                        <StatusBadge status="closed" /> This ticket is closed — no further actions allowed.
+                      </div>
+                      {(ticket as any).satisfactionRating != null && (
+                        <div className="px-3 py-3 rounded-xl border border-amber-200 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-900/10 space-y-1.5">
+                          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">User Satisfaction</p>
+                          <div className="flex gap-1">
+                            {[1,2,3,4,5].map(s => (
+                              <Star key={s} className={`w-4 h-4 ${s <= (ticket as any).satisfactionRating ? 'text-amber-400 fill-amber-400' : 'text-muted-foreground/20'}`} />
+                            ))}
+                            <span className="text-xs text-muted-foreground ml-1 self-center">{(ticket as any).satisfactionRating}/5</span>
+                          </div>
+                          {(ticket as any).satisfactionComment && (
+                            <p className="text-xs text-muted-foreground italic">"{(ticket as any).satisfactionComment}"</p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <Label className="mb-1.5 block">Update Status</Label>
+                        <Select
+                          value={ticket.status}
+                          onValueChange={handleStatusSelect}
+                          disabled={updateMutation.isPending || getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).length === 0}
+                        >
+                          <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={ticket.status} disabled>
+                              {STATUS_LABEL[ticket.status]} (current)
+                            </SelectItem>
+                            {getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).map(s => (
+                              <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {isAdmin && (
+                        <div>
+                          <Label className="mb-1.5 block">Priority</Label>
+                          <Select
+                            value={ticket.priority}
+                            onValueChange={(val) => { if (val !== ticket.priority) setPendingPriority(val); }}
+                            disabled={updateMutation.isPending}
+                          >
+                            <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {['critical', 'high', 'medium', 'low'].map(p => (
+                                <SelectItem key={p} value={p}>{PRIORITY_LABEL[p]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {isAdmin && (
+                        <div>
+                          <Label className="mb-1.5 block">Type</Label>
+                          <Select
+                            value={(ticket as any).type ?? 'other'}
+                            onValueChange={(val) => {
+                              if (val !== (ticket as any).type) {
+                                updateMutation.mutate({ id, data: { type: val } as any });
+                              }
+                            }}
+                            disabled={updateMutation.isPending}
+                          >
+                            <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {Object.values(TicketType).map(t => (
+                                <SelectItem key={t} value={t}>{TICKET_TYPE_LABEL[t]}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {isAdmin && (
+                        <div>
+                          <Label className="mb-1.5 flex items-center gap-1.5">
+                            <UserCheck className="w-4 h-4 text-primary" /> Assign To
+                          </Label>
+                          <Select
+                            value={ticket.assignedTo?.id ?? "unassigned"}
+                            onValueChange={(v) => handleAssign(v === "unassigned" ? null : v)}
+                            disabled={updateMutation.isPending || ticket.status === 'resolved'}
+                          >
+                            <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unassigned">Unassigned</SelectItem>
+                              {supportStaff?.map(s => (
+                                <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      {isSupport && ticket.status === 'open' && ticket.assignedTo?.id !== user?.id && (
+                        <Button variant="outline" className="w-full rounded-xl" disabled={updateMutation.isPending} onClick={() => handleAssign(user!.id)}>
+                          {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}
+                          Assign to Me
+                        </Button>
+                      )}
+
+                      {ticket.assignedTo && (
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground pt-1 border-t border-border/50">
+                          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                            {ticket.assignedTo.fullName.charAt(0)}
+                          </div>
+                          <span>Assigned to <span className="font-medium text-foreground">{ticket.assignedTo.fullName}</span></span>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )}
@@ -166,9 +511,9 @@ export default function TicketDetail() {
                 <CardContent className="p-6 space-y-3">
                   <h4 className="font-bold font-display text-lg leading-tight">{ticket.asset.name}</h4>
                   <div className="space-y-2 text-sm">
-                    <div className="flex justify-between"><span className="text-muted-foreground">Tag:</span> <span className="font-mono bg-muted px-1.5 py-0.5 rounded">{ticket.asset.assetTag}</span></div>
-                    <div className="flex justify-between"><span className="text-muted-foreground">Category:</span> <span className="capitalize">{ticket.asset.category}</span></div>
-                    <div className="flex justify-between items-center"><span className="text-muted-foreground">Asset Status:</span> <StatusBadge status={ticket.asset.status} /></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Tag:</span><span className="font-mono bg-muted px-1.5 py-0.5 rounded">{ticket.asset.assetTag}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Category:</span><span className="capitalize">{ticket.asset.category}</span></div>
+                    <div className="flex justify-between items-center"><span className="text-muted-foreground">Asset Status:</span><StatusBadge status={ticket.asset.status} /></div>
                   </div>
                 </CardContent>
                 {canManage && (
@@ -180,10 +525,84 @@ export default function TicketDetail() {
                 )}
               </Card>
             )}
-          </div>
 
+            {/* Satisfaction Rating — shown to ticket creator when resolved/closed */}
+            {(() => {
+              const isCreator = ticket.createdBy.id === user?.id;
+              const isDone = ticket.status === 'resolved' || ticket.status === 'closed';
+              const alreadyRated = (ticket as any).satisfactionRating != null;
+              if (!isCreator || !isDone) return null;
+              if (alreadyRated) {
+                const rating = (ticket as any).satisfactionRating as number;
+                return (
+                  <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
+                    <CardHeader className="border-b border-border/50 py-4 px-6">
+                      <CardTitle className="text-base font-display flex items-center gap-2">
+                        <Star className="w-5 h-5 text-amber-400 fill-amber-400" /> Your Rating
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-6 space-y-3">
+                      <div className="flex gap-1">
+                        {[1,2,3,4,5].map(s => (
+                          <Star key={s} className={`w-6 h-6 ${s <= rating ? 'text-amber-400 fill-amber-400' : 'text-muted-foreground/30'}`} />
+                        ))}
+                      </div>
+                      {(ticket as any).satisfactionComment && (
+                        <p className="text-sm text-muted-foreground italic">"{(ticket as any).satisfactionComment}"</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              }
+              return (
+                <Card className="border-amber-200 dark:border-amber-800/50 shadow-lg shadow-black/5 rounded-2xl">
+                  <CardHeader className="border-b border-border/50 py-4 px-6">
+                    <CardTitle className="text-base font-display flex items-center gap-2">
+                      <Star className="w-5 h-5 text-amber-400" /> Rate this Resolution
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-6 space-y-4">
+                    <p className="text-sm text-muted-foreground">How satisfied are you with how this ticket was handled?</p>
+                    <div className="flex gap-1.5">
+                      {[1,2,3,4,5].map(s => (
+                        <button
+                          key={s}
+                          onMouseEnter={() => setHoverRating(s)}
+                          onMouseLeave={() => setHoverRating(0)}
+                          onClick={() => setSelectedRating(s)}
+                          className="transition-transform hover:scale-110"
+                        >
+                          <Star className={`w-8 h-8 transition-colors ${s <= (hoverRating || selectedRating) ? 'text-amber-400 fill-amber-400' : 'text-muted-foreground/30'}`} />
+                        </button>
+                      ))}
+                    </div>
+                    {selectedRating > 0 && (
+                      <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+                        {['', 'Very Dissatisfied', 'Dissatisfied', 'Neutral', 'Satisfied', 'Very Satisfied'][selectedRating]}
+                      </p>
+                    )}
+                    <Textarea
+                      placeholder="Optional comment..."
+                      value={satisfactionComment}
+                      onChange={e => setSatisfactionComment(e.target.value)}
+                      className="rounded-xl min-h-[70px] resize-none text-sm"
+                    />
+                    <Button
+                      className="w-full rounded-xl"
+                      disabled={!selectedRating || satisfactionMutation.isPending}
+                      onClick={handleSubmitRating}
+                    >
+                      {satisfactionMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Star className="w-4 h-4 mr-2" />}
+                      Submit Rating
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })()}
+          </div>
         </div>
       </div>
     </AppLayout>
   );
 }
+

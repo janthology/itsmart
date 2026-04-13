@@ -1,17 +1,17 @@
-import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { useUpdateMyProfile } from "@workspace/api-client-react";
+import { useUpdateMyProfile } from "@/lib/supabase-queries";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Loader2, UserCircle, Mail, Shield, Building2 } from "lucide-react";
+import { Loader2, UserCircle, Mail, Shield, Building2, KeyRound } from "lucide-react";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { Link } from "wouter";
 
 const profileSchema = z.object({
   fullName: z.string().min(2, "Full name is required"),
@@ -36,7 +36,7 @@ export default function Profile() {
     try {
       await updateMutation.mutateAsync({ data: values });
       toast({ title: "Profile updated", description: "Your details have been saved." });
-      queryClient.invalidateQueries({ queryKey: ['/api/auth/me'] });
+      queryClient.invalidateQueries({ queryKey: ['currentUser'] });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update profile." });
     }
@@ -92,6 +92,19 @@ export default function Profile() {
                 </div>
               </form>
             </Form>
+          </CardContent>
+        </Card>
+        <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
+          <CardHeader className="px-8 pt-8 pb-4">
+            <CardTitle className="text-xl font-display flex items-center gap-2"><KeyRound className="w-5 h-5 text-primary" /> Password</CardTitle>
+            <CardDescription>Change your account password.</CardDescription>
+          </CardHeader>
+          <CardContent className="px-8 pb-8">
+            <Link href="/change-password">
+              <Button variant="outline" className="rounded-xl h-11 gap-2">
+                <KeyRound className="w-4 h-4" /> Change Password
+              </Button>
+            </Link>
           </CardContent>
         </Card>
       </div>

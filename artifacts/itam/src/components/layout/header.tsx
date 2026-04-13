@@ -1,4 +1,5 @@
 import { useLocation } from "wouter";
+import { NotificationsBell } from "@/components/ui/notifications-bell";
 
 export function Header() {
   const [location] = useLocation();
@@ -11,6 +12,7 @@ export function Header() {
     if (location.startsWith('/admin/users')) return 'User Management';
     if (location.startsWith('/admin/categories')) return 'Categories';
     if (location === '/profile') return 'My Profile';
+    if (location === '/reports') return 'Reports';
     return '';
   };
 
@@ -20,7 +22,7 @@ export function Header() {
         <h1 className="text-xl font-bold text-foreground">{getPageTitle()}</h1>
       </div>
       <div className="flex items-center gap-4">
-        {/* Can add global search or notifications here in the future */}
+        <NotificationsBell />
       </div>
     </header>
   );

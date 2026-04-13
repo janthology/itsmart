@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useGetCategories, useCreateCategory, useDeleteCategory } from "@workspace/api-client-react";
+import { useGetCategories, useCreateCategory, useDeleteCategory } from "@/lib/supabase-queries";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
 import { useAuth } from "@/lib/auth-context";
+import { PageHeader } from "@/components/ui/page-header";
 
 const createCategorySchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -63,15 +64,17 @@ export default function CategoriesManagement() {
 
   return (
     <AppLayout>
-      <div className="space-y-6 max-w-4xl mx-auto">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-display font-bold">Category Definitions</h2>
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="h-10 rounded-xl bg-primary hover:bg-primary/90 shadow-md shadow-primary/20">
-                <Plus className="w-4 h-4 mr-2" /> Add Category
-              </Button>
-            </DialogTrigger>
+      <div className="space-y-6">
+        <PageHeader
+          title="Categories"
+          subtitle="Define custom categories for asset classification"
+          action={
+            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="h-10 rounded-xl bg-primary hover:bg-primary/90 shadow-md shadow-primary/20">
+                  <Plus className="w-4 h-4 mr-2" /> Add Category
+                </Button>
+              </DialogTrigger>
             <DialogContent className="sm:max-w-[400px] rounded-2xl border-0 shadow-2xl">
               <DialogHeader>
                 <DialogTitle>New Category</DialogTitle>
@@ -94,7 +97,8 @@ export default function CategoriesManagement() {
               </Form>
             </DialogContent>
           </Dialog>
-        </div>
+          }
+        />
 
         <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl overflow-hidden">
           {isLoading ? (

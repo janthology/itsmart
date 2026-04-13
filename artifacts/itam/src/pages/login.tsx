@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, Link } from "wouter";
+import { Link } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, MonitorSmartphone } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 
 const loginSchema = z.object({
@@ -17,9 +17,9 @@ const loginSchema = z.object({
 });
 
 export default function Login() {
-  const [, setLocation] = useLocation();
   const { login } = useAuth();
   const [isPending, setIsPending] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
@@ -30,12 +30,11 @@ export default function Login() {
     setIsPending(true);
     try {
       await login(values);
-      setLocation("/dashboard");
     } catch (e) {
       // error handled in context
-    } finally {
       setIsPending(false);
     }
+    // don't reset isPending on success — page will navigate away
   };
 
   return (
@@ -51,16 +50,14 @@ export default function Login() {
         className="w-full max-w-md relative z-10"
       >
         <div className="flex justify-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white shadow-xl shadow-primary/20">
-            <MonitorSmartphone className="w-8 h-8" />
-          </div>
+          <img src="/dostlogo.png" alt="DOST Logo" className="w-20 h-20 object-contain drop-shadow-xl mx-auto" />
         </div>
 
         <Card className="border-0 shadow-2xl bg-card/80 backdrop-blur-xl">
           <CardHeader className="space-y-2 text-center pb-8">
-            <CardTitle className="text-3xl font-display font-bold text-foreground">Welcome back</CardTitle>
+            <CardTitle className="text-3xl font-display font-bold text-foreground">Welcome</CardTitle>
             <CardDescription className="text-base text-muted-foreground">
-              Sign in to manage your IT assets
+              Please sign in to continue
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -90,12 +87,21 @@ export default function Login() {
                     <FormItem>
                       <FormLabel className="text-foreground font-semibold">Password</FormLabel>
                       <FormControl>
-                        <Input 
-                          type="password" 
-                          placeholder="••••••••" 
-                          {...field} 
-                          className="h-12 bg-background border-border/50 focus-visible:ring-primary/20 transition-all rounded-xl"
-                        />
+                        <div className="relative">
+                          <Input
+                            type={showPassword ? "text" : "password"}
+                            placeholder="••••••••"
+                            {...field}
+                            className="h-12 bg-background border-border/50 focus-visible:ring-primary/20 transition-all rounded-xl pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(v => !v)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -119,10 +125,14 @@ export default function Login() {
             </Form>
             <div className="mt-8 text-center text-sm text-muted-foreground">
               Don't have an account?{" "}
-              <Link href="/register" className="font-semibold text-primary hover:text-primary/80 transition-colors">
-                Request access
+              <Link href="/register" className="font-semibold text-primary hover:underline text-primary transition-colors">
+                Sign up
               </Link>
             </div>
+            <p className="mt-4 text-center text-sm text-muted-foreground">
+              Forgot your password?{" "}
+              <span className="font-semibold text-foreground">Contact your MIS Admin.</span>
+            </p>
           </CardContent>
         </Card>
       </motion.div>

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useLocation, Link } from "wouter";
+import { Link } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Loader2, MonitorSmartphone } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 
 const registerSchema = z.object({
@@ -19,9 +19,9 @@ const registerSchema = z.object({
 });
 
 export default function Register() {
-  const [, setLocation] = useLocation();
   const { register } = useAuth();
   const [isPending, setIsPending] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const form = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),
@@ -32,12 +32,11 @@ export default function Register() {
     setIsPending(true);
     try {
       await register(values);
-      setLocation("/dashboard");
     } catch (e) {
       // error handled in context
-    } finally {
       setIsPending(false);
     }
+    // don't reset isPending on success — page will navigate away
   };
 
   return (
@@ -52,16 +51,14 @@ export default function Register() {
         className="w-full max-w-md relative z-10 my-8"
       >
         <div className="flex justify-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-accent flex items-center justify-center text-white shadow-xl shadow-primary/20">
-            <MonitorSmartphone className="w-8 h-8" />
-          </div>
+          <img src="/dostlogo.png" alt="DOST Logo" className="w-20 h-20 object-contain drop-shadow-xl mx-auto" />
         </div>
 
         <Card className="border-0 shadow-2xl bg-card/80 backdrop-blur-xl">
           <CardHeader className="space-y-2 text-center pb-6">
-            <CardTitle className="text-3xl font-display font-bold text-foreground">Create account</CardTitle>
+            <CardTitle className="text-3xl font-display font-bold text-foreground">Create Account</CardTitle>
             <CardDescription className="text-base text-muted-foreground">
-              Register to access the ITAM portal
+              Register to get access
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -113,7 +110,21 @@ export default function Register() {
                     <FormItem>
                       <FormLabel className="text-foreground font-semibold">Password</FormLabel>
                       <FormControl>
-                        <Input type="password" placeholder="••••••••" {...field} className="h-11 rounded-xl bg-background" />
+                        <div className="relative">
+                          <Input
+                            type={showPassword ? "text" : "password"}
+                            placeholder="••••••••"
+                            {...field}
+                            className="h-11 rounded-xl bg-background pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(v => !v)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
                       </FormControl>
                       <FormMessage />
                     </FormItem>
