@@ -207,11 +207,9 @@ export default function Reports() {
   const needsAssets = ["asset_inventory","asset_unassigned","asset_depreciation"].includes(activeId);
   const needsTickets = activeId === "ticket_list";
   const needsHistory = activeId === "asset_history";
-  const needsAllTix = ["ticket_performance","ticket_satisfaction"].includes(activeId);
-  const needsUsers = activeId === "user_activity";
 
   const { data: assetsData, isLoading: assetsLoading } = useGetAssets({
-    query: { status: assetStatus !== "all" ? assetStatus as AssetStatus : undefined },
+    query: needsAssets ? { status: assetStatus !== "all" ? assetStatus as AssetStatus : undefined } : {},
   });
   const ticketQuery: any = {
     status: ticketStatus !== "all" ? ticketStatus as TicketStatus : undefined,
@@ -333,8 +331,9 @@ export default function Reports() {
 
           {/* Left nav */}
           <div className="w-48 shrink-0 space-y-4">
-            {groups.map(g => (
+            {groups.map((g, gi) => (
               <div key={g.key}>
+                {gi > 0 && <div className="border-t border-border/40 my-3" />}
                 <p className="text-sm font-bold text-primary uppercase tracking-wider px-3 mb-1.5">{g.label}</p>
                 <div className="space-y-0.5">
                   {g.reports.map(r => {
@@ -344,7 +343,9 @@ export default function Reports() {
                       <button key={r.id} onClick={() => setActiveId(r.id)}
                         className={cn(
                           "w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-colors text-left",
-                          isActive ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                          isActive
+                            ? "bg-primary text-primary-foreground shadow-sm border-l-2 border-primary-foreground/50"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
                         )}>
                         <Icon className="w-4 h-4 shrink-0" />{r.label}
                       </button>
@@ -463,7 +464,7 @@ export default function Reports() {
                   {avgRating && (
                     <div className="flex items-center gap-2 text-sm bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 px-4 py-2.5 rounded-xl">
                       <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
-                      <span className="font-semibold text-foreground">{avgRating}/5</span>
+                      <span className="font-semibold text-foreground">{avgRating}/5.0</span>
                       <span className="text-muted-foreground">average across {ratedTickets.length} rated ticket{ratedTickets.length!==1?"s":""}</span>
                     </div>
                   )}
@@ -489,3 +490,4 @@ export default function Reports() {
     </AppLayout>
   );
 }
+

@@ -33,6 +33,8 @@ const createAssetSchema = z.object({
   status: z.nativeEnum(AssetStatus),
   purchaseDate: z.string().optional().nullable(),
   purchaseValue: z.coerce.number().optional().nullable(),
+  lastPmDate: z.string().optional().nullable(),
+  nextPmDate: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -81,7 +83,7 @@ export default function AssetsList() {
     defaultValues: {
       assetTag: "", name: "", model: "", serialNumber: "", location: "",
       category: "laptop" as AssetCategory, status: "active" as AssetStatus,
-      purchaseDate: "", purchaseValue: null, notes: "",
+      purchaseDate: "", purchaseValue: null, lastPmDate: "", nextPmDate: "", notes: "",
     },
   });
 
@@ -200,6 +202,12 @@ export default function AssetsList() {
                         )} />
                         <FormField control={form.control} name="purchaseValue" render={({ field }) => (
                           <FormItem><FormLabel>Purchase Value (₱)</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                        )} />
+                        <FormField control={form.control} name="lastPmDate" render={({ field }) => (
+                          <FormItem><FormLabel>Last PM Date</FormLabel><FormControl><Input type="date" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                        )} />
+                        <FormField control={form.control} name="nextPmDate" render={({ field }) => (
+                          <FormItem><FormLabel>Next PM Date</FormLabel><FormControl><Input type="date" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                         )} />
                       </div>
                       <FormField control={form.control} name="notes" render={({ field }) => (
@@ -325,7 +333,7 @@ export default function AssetsList() {
                         {asset.assignedTo ? (
                           <div className="flex items-center gap-2">
                             <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">
-                              {asset.assignedTo.fullName.charAt(0)}
+                              {asset.assignedTo.fullName?.charAt(0) ?? '?'}
                             </div>
                             <span className="text-sm font-medium">{asset.assignedTo.fullName}</span>
                           </div>

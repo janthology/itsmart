@@ -60,7 +60,7 @@ export function exportAssetsPdf(assets: any[], filters: { status?: string; from?
       a.purchaseValue != null ? `₱${Number(a.purchaseValue).toLocaleString()}` : "—",
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
 
@@ -123,7 +123,7 @@ export function exportTicketsPdf(tickets: any[], filters: { status?: string; pri
       t.resolvedAt ? format(new Date(t.resolvedAt), "MMM d, yyyy") : "—",
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
 
@@ -173,7 +173,7 @@ export function exportAssetHistoryPdf(history: any[], filters: { from?: string; 
       format(new Date(h.createdAt), "MMM d, yyyy HH:mm"),
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
   doc.save(`asset-history-${format(new Date(), "yyyyMMdd")}.pdf`);
@@ -243,7 +243,7 @@ export function exportTicketPerformancePdf(tickets: any[], filters: { from?: str
       ];
     }),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
     didParseCell: (data) => {
       if (data.column.index === 8 && data.section === "body") {
@@ -297,7 +297,7 @@ export function exportUserActivityPdf(users: any[]) {
       format(new Date(u.createdAt), "MMM d, yyyy"),
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
   doc.save(`user-activity-${format(new Date(), "yyyyMMdd")}.pdf`);
@@ -341,7 +341,7 @@ export function exportUnassignedAssetsPdf(assets: any[]) {
       a.purchaseValue != null ? `₱${Number(a.purchaseValue).toLocaleString()}` : "—",
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
   doc.save(`unassigned-assets-${format(new Date(), "yyyyMMdd")}.pdf`);
@@ -412,7 +412,7 @@ export function exportDepreciationPdf(assets: any[]) {
       ];
     }),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
   doc.save(`asset-depreciation-${format(new Date(), "yyyyMMdd")}.pdf`);
@@ -440,7 +440,7 @@ export function exportSatisfactionXlsx(tickets: any[]) {
 
 export function exportSatisfactionPdf(tickets: any[]) {
   const rated = tickets.filter((t) => t.satisfactionRating != null);
-  const avg = rated.length ? (rated.reduce((s, t) => s + t.satisfactionRating, 0) / rated.length).toFixed(2) : "N/A";
+  const avg = rated.length ? (rated.reduce((s, t) => s + t.satisfactionRating, 0) / rated.length).toFixed(1) : "N/A";
   const dist = [1, 2, 3, 4, 5].map((s) => rated.filter((t) => t.satisfactionRating === s).length);
 
   const doc = new jsPDF({ orientation: "landscape" });
@@ -448,7 +448,6 @@ export function exportSatisfactionPdf(tickets: any[]) {
   doc.text("Ticket Satisfaction Summary Report", 14, 16);
   doc.setFontSize(10); doc.setTextColor(120);
   doc.text(`Generated: ${format(new Date(), "MMMM d, yyyy h:mm a")}  |  Rated tickets: ${rated.length}  |  Average: ${avg}/5`, 14, 23);
-  doc.text(`Distribution — 1★: ${dist[0]}  2★: ${dist[1]}  3★: ${dist[2]}  4★: ${dist[3]}  5★: ${dist[4]}`, 14, 29);
   doc.setTextColor(0);
   autoTable(doc, {
     startY: 35,
@@ -463,8 +462,10 @@ export function exportSatisfactionPdf(tickets: any[]) {
       t.satisfactionComment ?? "—",
     ]),
     styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: { fillColor: [18, 52, 86], textColor: 255, fontStyle: "bold" },
+    headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
   doc.save(`satisfaction-report-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
+
+

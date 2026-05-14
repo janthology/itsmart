@@ -12,6 +12,9 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
+import { useEffect, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { formatDistanceToNow, format } from "date-fns";
 
 const profileSchema = z.object({
   fullName: z.string().min(2, "Full name is required"),
@@ -23,6 +26,13 @@ export default function Profile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateMutation = useUpdateMyProfile();
+  const [passwordChangedAt, setPasswordChangedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("profiles").select("password_changed_at").eq("id", user.id).single()
+      .then(({ data }) => { if (data) setPasswordChangedAt(data.password_changed_at ?? null); });
+  }, [user?.id]);
 
   const form = useForm<z.infer<typeof profileSchema>>({
     resolver: zodResolver(profileSchema),
@@ -99,12 +109,17 @@ export default function Profile() {
             <CardTitle className="text-xl font-display flex items-center gap-2"><KeyRound className="w-5 h-5 text-primary" /> Password</CardTitle>
             <CardDescription>Change your account password.</CardDescription>
           </CardHeader>
-          <CardContent className="px-8 pb-8">
+          <CardContent className="px-8 pb-8 space-y-3">
             <Link href="/change-password">
               <Button variant="outline" className="rounded-xl h-11 gap-2">
                 <KeyRound className="w-4 h-4" /> Change Password
               </Button>
             </Link>
+            <p className="text-xs text-muted-foreground">
+              {passwordChangedAt
+                ? <>Last changed <span title={format(new Date(passwordChangedAt), 'MMM d, yyyy h:mm a')} className="font-medium text-foreground">{formatDistanceToNow(new Date(passwordChangedAt), { addSuffix: true })}</span></>
+                : "Password has never been changed."}
+            </p>
           </CardContent>
         </Card>
       </div>

@@ -83,56 +83,56 @@
   
   --radius: 0.75rem;
 
-  /* Clean minimal enterprise - Light Mode */
-  --background: 210 20% 98%; /* soft cool gray background */
-  --foreground: 222 47% 11%;
+  /* Palette: #355872 | #7AAACE | #9CD5FF | #F7F8F0 */
+  --background: 75 14% 96%;        /* #F7F8F0 warm off-white */
+  --foreground: 207 25% 20%;       /* dark navy text */
   
-  --card: 0 0% 100%;
-  --card-foreground: 222 47% 11%;
-  --card-border: 214 32% 91%;
+  --card: 0 0% 100%;               /* pure white cards */
+  --card-foreground: 207 25% 20%;
+  --card-border: 207 20% 88%;
   
   --popover: 0 0% 100%;
-  --popover-foreground: 222 47% 11%;
-  --popover-border: 214 32% 91%;
+  --popover-foreground: 207 25% 20%;
+  --popover-border: 207 20% 88%;
   
-  --primary: 221 83% 53%; /* deep vibrant blue */
-  --primary-foreground: 210 40% 98%;
-  --primary-border: 221 83% 45%;
+  --primary: 207 38% 33%;          /* #355872 */
+  --primary-foreground: 75 14% 96%;
+  --primary-border: 207 38% 26%;
   
-  --secondary: 210 40% 96%;
-  --secondary-foreground: 222 47% 11%;
-  --secondary-border: 214 32% 91%;
+  --secondary: 207 30% 92%;        /* light tint of #7AAACE */
+  --secondary-foreground: 207 25% 20%;
+  --secondary-border: 207 30% 84%;
   
-  --muted: 210 40% 96%;
-  --muted-foreground: 215 16% 47%;
-  --muted-border: 214 32% 91%;
+  --muted: 207 20% 93%;
+  --muted-foreground: 207 18% 45%;
+  --muted-border: 207 20% 86%;
   
-  --accent: 262 83% 58%; /* purple accent */
-  --accent-foreground: 210 40% 98%;
-  --accent-border: 262 83% 50%;
+  --accent: 207 55% 62%;           /* #7AAACE */
+  --accent-foreground: 0 0% 100%;
+  --accent-border: 207 55% 52%;
   
   --destructive: 0 84% 60%;
   --destructive-foreground: 210 40% 98%;
   --destructive-border: 0 84% 50%;
   
-  --border: 214 32% 91%;
-  --input: 214 32% 91%;
-  --ring: 221 83% 53%;
+  --border: 207 20% 88%;
+  --input: 207 20% 88%;
+  --ring: 207 38% 33%;
   
-  /* Deep professional dark sidebar */
-  --sidebar: 210 65% 20%;
-  --sidebar-foreground: 210 40% 98%;
-  --sidebar-border: 210 65% 26%;
-  --sidebar-primary: 221 83% 53%;
-  --sidebar-primary-foreground: 210 40% 98%;
-  --sidebar-primary-border: 221 83% 45%;
-  --sidebar-accent: 210 65% 27%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-accent-border: 210 65% 32%;
-  --sidebar-ring: 221 83% 53%;
+  /* Sidebar: #355872 base */
+  --sidebar: 207 38% 33%;          /* #355872 */
+  --sidebar-foreground: 75 14% 96%;
+  --sidebar-border: 207 38% 28%;
+  --sidebar-primary: 207 55% 62%;  /* #7AAACE active item */
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-primary-border: 207 55% 52%;
+  --sidebar-accent: 207 38% 28%;   /* slightly darker hover */
+  --sidebar-accent-foreground: 75 14% 96%;
+  --sidebar-accent-border: 207 38% 24%;
+  --sidebar-ring: 207 55% 62%;
 
-  --chart-1: 221 83% 53%;
-  --chart-2: 262 83% 58%;
+  --chart-1: 207 38% 33%;
+  --chart-2: 207 55% 62%;
   --chart-3: 142 71% 45%;
   --chart-4: 38 92% 50%;
   --chart-5: 0 84% 60%;
@@ -153,6 +153,25 @@
   }
 }
 
+/* Gooey loader */
+.gooey-loader {
+  width: 60px;
+  aspect-ratio: 1;
+  border: 8px solid #355872;
+  box-sizing: border-box;
+  background:
+    radial-gradient(farthest-side, #F7F8F0 98%, #0000) top,
+    radial-gradient(farthest-side, #F7F8F0 98%, #0000) top,
+    radial-gradient(farthest-side, #F7F8F0 98%, #0000) left,
+    radial-gradient(farthest-side, #F7F8F0 98%, #0000) right,
+    radial-gradient(farthest-side, #F7F8F0 98%, #0000) bottom,
+    #355872;
+  background-size: 16px 16px;
+  background-repeat: no-repeat;
+  filter: blur(3px) contrast(10);
+  animation: gooey-spin 2s infinite;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
@@ -167,4 +186,12 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.5);
+}
+
+@keyframes gooey-spin {
+  0%   { background-position: top, top, left, right, bottom }
+  25%  { background-position: right, top, left, right, bottom }
+  50%  { background-position: bottom, top, left, right, bottom }
+  75%  { background-position: left, top, left, right, bottom }
+  100% { background-position: top, top, left, right, bottom }
 }

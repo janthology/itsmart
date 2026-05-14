@@ -94,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (!mounted) return;
-      console.log('[auth] event:', event, session?.user?.email ?? 'none');
 
       if (session?.user) {
         setUser(userFromSession(session.user));
@@ -183,7 +182,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         full_name: fullName,
         department: department ?? null,
         role: 'general_user',
-      }, { onConflict: 'id' }).then(() => {});
+      }, { onConflict: 'id' }).then(() => {}).catch((err) => {
+        console.error('[register] profile upsert failed:', err);
+      });
     }
     toast({ title: "Account created", description: "Welcome to ITAM." });
   };
@@ -212,3 +213,4 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;
 }
+

@@ -69,9 +69,12 @@ export default function ChangePassword() {
       const { error } = await supabase.auth.updateUser({ password: next });
       if (error) throw error;
 
-      // Clear the must_change_password flag
+      // Clear the must_change_password flag and stamp password_changed_at
       if (user?.id) {
-        await supabase.from("profiles").update({ must_change_password: false }).eq("id", user.id);
+        await supabase.from("profiles").update({
+          must_change_password: false,
+          password_changed_at: new Date().toISOString(),
+        }).eq("id", user.id);
       }
 
       toast({ title: "Password changed", description: "Your password has been updated successfully." });

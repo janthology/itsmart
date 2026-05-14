@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
-import { Bell, CheckCheck, MonitorSmartphone, TicketIcon, MessageSquare, Info, AlertTriangle, TimerOff } from "lucide-react";
+import { Bell, CheckCheck, Trash2, MonitorSmartphone, TicketIcon, MessageSquare, Info, AlertTriangle, TimerOff } from "lucide-react";
 import { useNotifications } from "@/lib/notifications-context";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,7 @@ const TYPE_COLOR: Record<string, string> = {
 
 export function NotificationsBell() {
   const [open, setOpen] = useState(false);
-  const { notifications, unreadCount, markRead, markAllRead } = useNotifications();
+  const { notifications, unreadCount, markRead, markAllRead, clearAll } = useNotifications();
   const [, setLocation] = useLocation();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -64,14 +64,24 @@ export function NotificationsBell() {
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border/50">
             <span className="font-semibold text-sm text-foreground">Notifications</span>
-            {unreadCount > 0 && (
-              <button
-                onClick={markAllRead}
-                className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium transition-colors"
-              >
-                <CheckCheck className="w-3.5 h-3.5" /> Mark all read
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {unreadCount > 0 && (
+                <button
+                  onClick={markAllRead}
+                  className="flex items-center gap-1 text-xs text-primary hover:text-primary/80 font-medium transition-colors"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" /> Mark all read
+                </button>
+              )}
+              {notifications.length > 0 && (
+                <button
+                  onClick={clearAll}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive font-medium transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Clear all
+                </button>
+              )}
+            </div>
           </div>
 
           {/* List */}

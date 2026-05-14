@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useSubmitSatisfactionRating, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
+import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -78,7 +78,18 @@ export default function TicketDetail() {
   const updateMutation = useUpdateTicket();
   const commentMutation = useAddTicketComment();
   const { data: supportStaff } = useGetSupportStaff();
+  const { data: staffWorkload = [] } = useGetStaffWorkload();
   const satisfactionMutation = useSubmitSatisfactionRating();
+
+  // Smart routing: rank staff by workload (fewer active = better) 
+  const rankedStaff = useMemo(() => {
+    if (!supportStaff) return [];
+    return [...supportStaff].sort((a, b) => {
+      const aLoad = staffWorkload.find(w => w.id === a.id)?.totalActive ?? 0;
+      const bLoad = staffWorkload.find(w => w.id === b.id)?.totalActive ?? 0;
+      return aLoad - bLoad; // lowest workload first
+    });
+  }, [supportStaff, staffWorkload]);
 
   const [commentText, setCommentText] = useState("");
   const [hoverRating, setHoverRating] = useState(0);
@@ -165,7 +176,6 @@ export default function TicketDetail() {
     try {
       await commentMutation.mutateAsync({ id, data: { commentText } });
       setCommentText("");
-      queryClient.invalidateQueries({ queryKey: [`/api/tickets/${id}`] });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to add comment." });
     }
@@ -474,11 +484,26 @@ export default function TicketDetail() {
                             <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {supportStaff?.map(s => (
-                                <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
-                              ))}
+                              {rankedStaff.map((s, i) => {
+                                const load = staffWorkload.find(w => w.id === s.id)?.totalActive ?? 0;
+                                const isRecommended = i === 0 && load === Math.min(...rankedStaff.map(r => staffWorkload.find(w => w.id === r.id)?.totalActive ?? 0));
+                                return (
+                                  <SelectItem key={s.id} value={s.id}>
+                                    <span className="flex items-center gap-2">
+                                      {s.fullName}
+                                      <span className="text-xs text-muted-foreground">({load} active)</span>
+                                      {isRecommended && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">★ Suggested</span>}
+                                    </span>
+                                  </SelectItem>
+                                );
+                              })}
                             </SelectContent>
                           </Select>
+                          {rankedStaff.length > 0 && !ticket.assignedTo && (
+                            <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
+                              ★ Suggested based on current workload
+                            </p>
+                          )}
                         </div>
                       )}
 

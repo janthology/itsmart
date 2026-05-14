@@ -23,7 +23,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
     QRCode.toDataURL(qrValue, {
       width: 160,
       margin: 1,
-      color: { dark: "#123456", light: "#ffffff" },
+      color: { dark: "#355872", light: "#ffffff" },
     }).then(setQrDataUrl);
   }, [qrValue]);
 
@@ -42,7 +42,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: flex-start; padding: 24px; background: #fff; }
           .label {
-            border: 2px solid #123456;
+            border: 2px solid #355872;
             border-radius: 12px;
             padding: 20px;
             width: 280px;
@@ -53,7 +53,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
           }
           .header {
             width: 100%;
-            background: #123456;
+            background: #355872;
             color: white;
             text-align: center;
             padding: 8px 12px;
@@ -67,7 +67,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
           .tag {
             font-size: 22px;
             font-weight: 800;
-            color: #123456;
+            color: #355872;
             letter-spacing: 0.05em;
             font-family: monospace;
           }
@@ -76,7 +76,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
           .divider { width: 100%; border-top: 1px dashed #cbd5e1; }
           @media print {
             body { padding: 0; }
-            .label { border-radius: 0; border: 2px solid #123456; }
+            .label { border-radius: 0; border: 2px solid #355872; }
           }
         </style>
       </head>
@@ -131,3 +131,4 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
     </Card>
   );
 }
+

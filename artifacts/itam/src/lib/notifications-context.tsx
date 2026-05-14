@@ -17,6 +17,7 @@ type NotificationsContextType = {
   unreadCount: number;
   markRead: (id: string) => Promise<void>;
   markAllRead: () => Promise<void>;
+  clearAll: () => Promise<void>;
 };
 
 const NotificationsContext = createContext<NotificationsContextType>({
@@ -24,6 +25,7 @@ const NotificationsContext = createContext<NotificationsContextType>({
   unreadCount: 0,
   markRead: async () => {},
   markAllRead: async () => {},
+  clearAll: async () => {},
 });
 
 export function NotificationsProvider({ children }: { children: ReactNode }) {
@@ -89,10 +91,16 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
+  const clearAll = async () => {
+    if (!user?.id) return;
+    await supabase.from("notifications").delete().eq("user_id", user.id);
+    setNotifications([]);
+  };
+
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   return (
-    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead }}>
+    <NotificationsContext.Provider value={{ notifications, unreadCount, markRead, markAllRead, clearAll }}>
       {children}
     </NotificationsContext.Provider>
   );

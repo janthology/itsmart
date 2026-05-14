@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "wouter";
+import { Link, Redirect } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -10,6 +10,9 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
+
+// Self-registration is disabled — accounts are created by administrators only.
+const REGISTRATION_ENABLED = false;
 
 const registerSchema = z.object({
   fullName: z.string().min(2, "Full name is required"),
@@ -22,6 +25,10 @@ export default function Register() {
   const { register } = useAuth();
   const [isPending, setIsPending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+
+  if (!REGISTRATION_ENABLED) {
+    return <Redirect to="/login" />;
+  }
 
   const form = useForm<z.infer<typeof registerSchema>>({
     resolver: zodResolver(registerSchema),

@@ -12,9 +12,11 @@
   "dependencies": {
     "@supabase/supabase-js": "catalog:",
     "@types/qrcode": "^1.5.6",
+    "@types/react-big-calendar": "^1.16.3",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "qrcode": "^1.5.4",
+    "react-big-calendar": "^1.19.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {

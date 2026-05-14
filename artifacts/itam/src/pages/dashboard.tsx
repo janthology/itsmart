@@ -1,9 +1,9 @@
-import { useGetDashboardStats, useGetStaffWorkload, useGetTicketTrend } from "@/lib/supabase-queries";
+import { useGetDashboardStats, useGetStaffWorkload, useGetTicketTrend, useGetAssetAnomalies } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
-import { Monitor, TicketIcon, CheckCircle2, AlertCircle, Loader2, ArrowRight, PackageX, Clock, Users } from "lucide-react";
+import { Monitor, TicketIcon, CheckCircle2, AlertCircle, Loader2, ArrowRight, PackageX, Clock, Users, AlertTriangle, Wrench, Archive, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { format } from "date-fns";
@@ -16,6 +16,7 @@ export default function Dashboard() {
   const isAdmin = user?.role === 'administrator';
   const { data: staffWorkload = [] } = useGetStaffWorkload();
   const { data: ticketTrend = [] } = useGetTicketTrend(8);
+  const { data: assetAnomalies = [] } = useGetAssetAnomalies();
 
   if (isLoading) {
     return (
@@ -100,8 +101,14 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent className="p-0 flex-1 flex flex-col">
                 {stats.recentTickets.length === 0 ? (
-                  <div className="flex-1 flex items-center justify-center p-8 text-muted-foreground">
-                    No recent tickets found.
+                  <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-3">
+                    <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center">
+                      <TicketIcon className="w-7 h-7 text-muted-foreground/40" />
+                    </div>
+                    <div>
+                      <p className="font-semibold text-foreground">No tickets yet</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">Support tickets will appear here once created.</p>
+                    </div>
                   </div>
                 ) : (
                   <div className="divide-y divide-border/50">
@@ -249,6 +256,61 @@ export default function Dashboard() {
                       </div>
                     );
                   })}
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
+        {/* Asset Anomaly Alerts — admin only */}
+        {isAdmin && assetAnomalies.length > 0 && (
+          <motion.div variants={item}>
+            <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
+              <CardHeader className="border-b border-border/50 px-6 py-5 flex flex-row items-center justify-between">
+                <CardTitle className="text-lg font-display flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-500" /> Asset Alerts
+                  <span className="ml-1 text-xs font-normal bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-700">
+                    {assetAnomalies.length}
+                  </span>
+                </CardTitle>
+                <Link href="/assets" className="text-sm font-medium text-primary hover:text-primary/80 flex items-center gap-1 group">
+                  View assets <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                </Link>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y divide-border/50">
+                  {assetAnomalies.slice(0, 8).map((anomaly) => {
+                    const iconMap = {
+                      frequent_reassignment: Zap,
+                      long_maintenance: Wrench,
+                      inactive_long: Archive,
+                      end_of_life: AlertTriangle,
+                      pm_overdue: Wrench,
+                    };
+                    const Icon = iconMap[anomaly.type];
+                    const isCritical = anomaly.severity === 'critical';
+                    return (
+                      <Link key={`${anomaly.assetId}-${anomaly.type}`} href={`/assets/${anomaly.assetId}`}
+                        className="flex items-start gap-4 px-6 py-4 hover:bg-muted/50 transition-colors">
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 mt-0.5 ${isCritical ? 'bg-red-100 dark:bg-red-900/20' : 'bg-amber-100 dark:bg-amber-900/20'}`}>
+                          <Icon className={`w-4 h-4 ${isCritical ? 'text-red-600 dark:text-red-400' : 'text-amber-600 dark:text-amber-400'}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-sm text-foreground">{anomaly.assetName}</span>
+                            <span className="font-mono text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{anomaly.assetTag}</span>
+                            {isCritical && <span className="text-xs font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-1.5 py-0.5 rounded border border-red-200 dark:border-red-800">Critical</span>}
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-0.5">{anomaly.message}</p>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                  {assetAnomalies.length > 8 && (
+                    <div className="px-6 py-3 text-xs text-muted-foreground text-center">
+                      +{assetAnomalies.length - 8} more — <Link href="/assets" className="text-primary hover:underline">view all assets</Link>
+                    </div>
+                  )}
                 </div>
               </CardContent>
             </Card>

@@ -19,6 +19,7 @@ import CategoriesManagement from "./pages/admin/categories";
 import Profile from "./pages/profile";
 import Reports from "./pages/reports";
 import ChangePassword from "./pages/change-password";
+import CalendarPage from "./pages/calendar";
 import NotFound from "./pages/not-found";
 
 const queryClient = new QueryClient({
@@ -64,6 +65,7 @@ function Router() {
       <Route path="/reports">{() => <ProtectedRoute component={Reports} />}</Route>
       <Route path="/profile">{() => <ProtectedRoute component={Profile} />}</Route>
       <Route path="/change-password">{() => <ProtectedRoute component={ChangePassword} />}</Route>
+      <Route path="/calendar">{() => <ProtectedRoute component={CalendarPage} />}</Route>
 
       <Route path="/">
         <Redirect to="/dashboard" />

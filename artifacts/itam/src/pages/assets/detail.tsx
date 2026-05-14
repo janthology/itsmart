@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRoute, Link, useLocation } from "wouter";
+import { useRoute, Link } from "wouter";
 import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
@@ -29,6 +29,8 @@ type UpdateAssetForm = {
   status: AssetStatus;
   purchaseDate?: string | null;
   purchaseValue?: number | null;
+  lastPmDate?: string | null;
+  nextPmDate?: string | null;
   notes?: string | null;
 };
 
@@ -41,13 +43,14 @@ const updateAssetSchema: z.ZodType<UpdateAssetForm> = z.object({
   status: z.enum(['active','inactive','maintenance','retired'] as const),
   purchaseDate: z.string().optional().nullable(),
   purchaseValue: z.coerce.number().optional().nullable(),
+  lastPmDate: z.string().optional().nullable(),
+  nextPmDate: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
 export default function AssetDetail() {
   const [, params] = useRoute("/assets/:id");
   const id = params?.id || "";
-  const [, setLocation] = useLocation();
   const { user } = useAuth();
   const isAdmin = user?.role === 'administrator';
   const { toast } = useToast();
@@ -75,6 +78,8 @@ export default function AssetDetail() {
       status: asset.status as AssetStatus,
       purchaseDate: asset.purchaseDate ?? "",
       purchaseValue: a.purchaseValue ?? null,
+      lastPmDate: a.lastPmDate ?? "",
+      nextPmDate: a.nextPmDate ?? "",
       notes: asset.notes ?? "",
     } : undefined,
   });
@@ -93,6 +98,8 @@ export default function AssetDetail() {
           ['status', 'Status', asset.status],
           ['purchaseDate', 'Purchase Date', asset.purchaseDate ?? ''],
           ['purchaseValue', 'Purchase Value', a.purchaseValue != null ? String(a.purchaseValue) : ''],
+          ['lastPmDate', 'Last PM Date', a.lastPmDate ?? ''],
+          ['nextPmDate', 'Next PM Date', a.nextPmDate ?? ''],
           ['notes', 'Notes', asset.notes ?? ''],
         ];
         for (const [key, label, oldVal] of fieldMap) {
@@ -276,6 +283,12 @@ export default function AssetDetail() {
                       <FormField control={form.control} name="purchaseValue" render={({ field }) => (
                         <FormItem><FormLabel>Purchase Value (₱)</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                       )} />
+                      <FormField control={form.control} name="lastPmDate" render={({ field }) => (
+                        <FormItem><FormLabel>Last PM Date</FormLabel><FormControl><Input type="date" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                      )} />
+                      <FormField control={form.control} name="nextPmDate" render={({ field }) => (
+                        <FormItem><FormLabel>Next PM Date</FormLabel><FormControl><Input type="date" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                      )} />
                     </div>
                     <FormField control={form.control} name="notes" render={({ field }) => (
                       <FormItem><FormLabel>Notes</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} className="rounded-xl min-h-[100px]" /></FormControl><FormMessage /></FormItem>
@@ -296,6 +309,8 @@ export default function AssetDetail() {
                   <div><p className="text-muted-foreground mb-1 flex items-center gap-1"><MapPin className="w-3 h-3" />Location</p><p className="font-medium text-base">{a.location || <span className="text-muted-foreground italic font-normal">—</span>}</p></div>
                   <div><p className="text-muted-foreground mb-1">Purchase Date</p><p className="font-medium text-base">{asset.purchaseDate ? format(new Date(asset.purchaseDate), 'MMMM d, yyyy') : <span className="text-muted-foreground italic font-normal">—</span>}</p></div>
                   <div><p className="text-muted-foreground mb-1">Purchase Value</p><p className="font-medium text-base">{a.purchaseValue != null ? `₱${Number(a.purchaseValue).toLocaleString()}` : <span className="text-muted-foreground italic font-normal">—</span>}</p></div>
+                  <div><p className="text-muted-foreground mb-1">Last PM Date</p><p className="font-medium text-base">{a.lastPmDate ? format(new Date(a.lastPmDate), 'MMMM d, yyyy') : <span className="text-muted-foreground italic font-normal">—</span>}</p></div>
+                  <div><p className="text-muted-foreground mb-1">Next PM Date</p><p className={`font-medium text-base ${a.nextPmDate && new Date(a.nextPmDate) < new Date() ? 'text-red-600 dark:text-red-400' : ''}`}>{a.nextPmDate ? format(new Date(a.nextPmDate), 'MMMM d, yyyy') : <span className="text-muted-foreground italic font-normal">—</span>}{a.nextPmDate && new Date(a.nextPmDate) < new Date() && <span className="ml-2 text-xs font-medium text-red-600 dark:text-red-400">Overdue</span>}</p></div>
                   <div className="col-span-2">
                     <p className="text-muted-foreground mb-2">Notes</p>
                     <p className="font-medium bg-muted/30 p-4 rounded-xl border border-border/50 min-h-[80px]">

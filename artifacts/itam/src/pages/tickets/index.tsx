@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useSearch } from "wouter";
-import { useGetTickets, useCreateTicket, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
+import { useGetTickets, useCreateTicket, useGetSupportStaff, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Loader2, TicketIcon, X, FilePlus, ChevronsUpDown, Check } from "lucide-react";
-import { format } from "date-fns";
+import { format, formatDistanceToNow, isToday, isYesterday } from "date-fns";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -26,6 +26,16 @@ import { SkeletonTable } from "@/components/ui/skeleton-table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+
+function formatTicketDate(dateStr: string): { relative: string; full: string } {
+  const d = new Date(dateStr);
+  const full = format(d, 'MMM d, yyyy h:mm a');
+  let relative: string;
+  if (isToday(d)) relative = formatDistanceToNow(d, { addSuffix: true });
+  else if (isYesterday(d)) relative = `Yesterday ${format(d, 'h:mm a')}`;
+  else relative = format(d, 'MMM d, yyyy');
+  return { relative, full };
+}
 
 const PAGE_SIZE = 25;
 
@@ -69,6 +79,7 @@ export default function TicketsList() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [scope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -87,6 +98,7 @@ export default function TicketsList() {
   }, [searchString]);
 
   const { data: assets } = useGetAssets();
+  const { data: supportStaff } = useGetSupportStaff();
   const createMutation = useCreateTicket();
 
   const queryFilters: any = {
@@ -94,6 +106,7 @@ export default function TicketsList() {
     status: statusFilter !== "all" ? statusFilter as any : undefined,
     priority: priorityFilter !== "all" ? priorityFilter as any : undefined,
   };
+  if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
   if (scope === "mine") {
     if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
     if (isSupport) queryFilters.assignedTo = user?.id;
@@ -102,9 +115,15 @@ export default function TicketsList() {
   const { data, isLoading } = useGetTickets({ query: queryFilters });
 
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [search, statusFilter, priorityFilter, scope]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, priorityFilter, assigneeFilter, scope]);
 
-  const allTickets = data?.data ?? [];
+  const allTickets = useMemo(() => {
+    let base = data?.data ?? [];
+    if (isAdmin && assigneeFilter === "unassigned") {
+      base = base.filter(t => !t.assignedTo);
+    }
+    return base;
+  }, [data, isAdmin, assigneeFilter]);
   const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const form = useForm<z.infer<typeof createTicketSchema>>({
@@ -127,7 +146,7 @@ export default function TicketsList() {
     }
   };
 
-  const hasActiveFilters = statusFilter !== "all" || priorityFilter !== "all" || search;
+  const hasActiveFilters = statusFilter !== "all" || priorityFilter !== "all" || (isAdmin && assigneeFilter !== "all") || search;
 
   return (
     <AppLayout>
@@ -323,9 +342,24 @@ export default function TicketsList() {
               </SelectContent>
             </Select>
 
+            {isAdmin && (
+              <Select value={assigneeFilter} onValueChange={setAssigneeFilter}>
+                <SelectTrigger className="h-10 w-[160px] rounded-xl text-sm border-border/50">
+                  <SelectValue placeholder="Assigned To" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Assignees</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  {supportStaff?.map(s => (
+                    <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" className="h-10 px-3 rounded-xl text-muted-foreground"
-                onClick={() => { setSearch(""); setStatusFilter("all"); setPriorityFilter("all"); }}>
+                onClick={() => { setSearch(""); setStatusFilter("all"); setPriorityFilter("all"); setAssigneeFilter("all"); }}>
                 <X className="w-4 h-4 mr-1" /> Clear
               </Button>
             )}
@@ -338,6 +372,11 @@ export default function TicketsList() {
             {search && <Badge variant="secondary" className="rounded-lg">Search: "{search}"</Badge>}
             {statusFilter !== "all" && <Badge variant="secondary" className="rounded-lg">Status: {STATUS_LABEL[statusFilter]}</Badge>}
             {priorityFilter !== "all" && <Badge variant="secondary" className="rounded-lg">Priority: {PRIORITY_LABEL[priorityFilter]}</Badge>}
+            {isAdmin && assigneeFilter !== "all" && (
+              <Badge variant="secondary" className="rounded-lg">
+                Assigned To: {assigneeFilter === "unassigned" ? "Unassigned" : supportStaff?.find(s => s.id === assigneeFilter)?.fullName ?? assigneeFilter}
+              </Badge>
+            )}
           </div>
         )}
 
@@ -424,7 +463,7 @@ export default function TicketsList() {
                         )}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {format(new Date(ticket.createdAt), 'MMM d, yyyy h:mm a')}
+                        {(() => { const { relative, full } = formatTicketDate(ticket.createdAt); return <span title={full}>{relative}</span>; })()}
                       </TableCell>
                       <TableCell className="text-right px-6">
                         <Link href={`/tickets/${ticket.id}`}>

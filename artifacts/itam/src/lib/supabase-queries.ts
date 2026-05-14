@@ -72,7 +72,7 @@ export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
-function mapUser(u: any): UserProfile & { isActive?: boolean } {
+function mapUser(u: any): UserProfile & { isActive?: boolean; lastSignInAt?: string | null } {
   return {
     id: u.id,
     email: u.email ?? '',
@@ -82,10 +82,11 @@ function mapUser(u: any): UserProfile & { isActive?: boolean } {
     createdAt: u.created_at,
     updatedAt: u.updated_at,
     isActive: u.is_active ?? true,
+    lastSignInAt: u.last_sign_in_at ?? null,
   };
 }
 
-function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: string | null; model?: string | null; purchaseValue?: number | null } {
+function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: string | null; model?: string | null; purchaseValue?: number | null; lastPmDate?: string | null; nextPmDate?: string | null } {
   return {
     id: a.id,
     assetTag: a.asset_tag,
@@ -101,6 +102,8 @@ function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: st
     location: a.location ?? null,
     model: a.model ?? null,
     purchaseValue: a.purchase_value ?? null,
+    lastPmDate: a.last_pm_date ?? null,
+    nextPmDate: a.next_pm_date ?? null,
   };
 }
 
@@ -237,7 +240,7 @@ export function useGetAsset(id: string) {
 export function useCreateAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ data }: { data: CreateAssetRequest & { serialNumber?: string; location?: string; model?: string; purchaseValue?: number } }) => {
+    mutationFn: async ({ data }: { data: CreateAssetRequest & { serialNumber?: string; location?: string; model?: string; purchaseValue?: number; lastPmDate?: string; nextPmDate?: string } }) => {
       const { data: row, error } = await supabase.from('assets').insert({
         asset_tag: data.assetTag,
         name: data.name,
@@ -250,6 +253,8 @@ export function useCreateAsset() {
         serial_number: (data as any).serialNumber ?? null,
         location: (data as any).location ?? null,
         model: (data as any).model ?? null,
+        last_pm_date: (data as any).lastPmDate ?? null,
+        next_pm_date: (data as any).nextPmDate ?? null,
       }).select().single();
       if (error) throw error;
       return row;
@@ -261,7 +266,7 @@ export function useCreateAsset() {
 export function useUpdateAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: UpdateAssetRequest & { serialNumber?: string; location?: string; model?: string; purchaseValue?: number } }) => {
+    mutationFn: async ({ id, data }: { id: string; data: UpdateAssetRequest & { serialNumber?: string; location?: string; model?: string; purchaseValue?: number; lastPmDate?: string; nextPmDate?: string } }) => {
       const updates: any = { updated_at: new Date().toISOString() };
       if (data.name !== undefined) updates.name = data.name;
       if (data.category !== undefined) updates.category = data.category;
@@ -273,6 +278,8 @@ export function useUpdateAsset() {
       if ((data as any).serialNumber !== undefined) updates.serial_number = (data as any).serialNumber;
       if ((data as any).location !== undefined) updates.location = (data as any).location;
       if ((data as any).model !== undefined) updates.model = (data as any).model;
+      if ((data as any).lastPmDate !== undefined) updates.last_pm_date = (data as any).lastPmDate || null;
+      if ((data as any).nextPmDate !== undefined) updates.next_pm_date = (data as any).nextPmDate || null;
       const { error } = await supabase.from('assets').update(updates).eq('id', id);
       if (error) throw error;
     },
@@ -484,11 +491,38 @@ export function useGetUsers(opts?: { query?: { search?: string } }) {
     queryKey: ['users', search],
     enabled: !!authed,
     queryFn: async () => {
-      let q = supabase.from('profiles_with_email').select('*').order('created_at', { ascending: false });
-      if (search) q = q.ilike('full_name', `%${search}%`);
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []).map(mapUser);
+      // Query profiles directly — email comes from the view if available,
+      // falls back to profiles-only if the view is inaccessible
+      let data: any[] | null = null;
+      let error: any = null;
+
+      // Try the view first (includes email + last_sign_in_at)
+      const viewResult = await supabase
+        .from('profiles_with_email')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!viewResult.error) {
+        data = viewResult.data;
+      } else {
+        // Fallback: query profiles directly (no email/last_sign_in)
+        const profilesResult = await supabase
+          .from('profiles')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (profilesResult.error) throw profilesResult.error;
+        data = profilesResult.data;
+      }
+
+      let users = (data ?? []).map(mapUser);
+      if (search) {
+        const term = search.toLowerCase();
+        users = users.filter(u =>
+          u.fullName.toLowerCase().includes(term) ||
+          (u.email && u.email.toLowerCase().includes(term))
+        );
+      }
+      return users;
     },
   });
 }
@@ -868,3 +902,126 @@ export function useGetAllTicketsForReport() {
   });
 }
 
+
+// ─── ASSET ANOMALY DETECTION ──────────────────────────────────────────────────
+
+export type AnomalySeverity = 'warning' | 'critical';
+
+export interface AssetAnomaly {
+  assetId: string;
+  assetTag: string;
+  assetName: string;
+  type: 'frequent_reassignment' | 'long_maintenance' | 'inactive_long' | 'end_of_life' | 'pm_overdue';
+  severity: AnomalySeverity;
+  message: string;
+}
+
+// Useful life in years by category (for end-of-life detection)
+const USEFUL_LIFE: Record<string, number> = {
+  laptop: 4, desktop: 5, monitor: 6, printer: 5,
+  server: 6, phone: 3, tablet: 3, networking: 7,
+  peripheral: 4, other: 5,
+};
+
+export function useGetAssetAnomalies() {
+  const { data: authed } = useHasSession();
+  return useQuery<AssetAnomaly[]>({
+    queryKey: ['assetAnomalies'],
+    enabled: !!authed,
+    staleTime: 5 * 60 * 1000, // 5 min cache
+    queryFn: async () => {
+      const now = Date.now();
+      const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const oneYearAgo = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [assetsRes, historyRes] = await Promise.all([
+        supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at'),
+        supabase.from('asset_history')
+          .select('asset_id, action, created_at')
+          .in('action', ['assigned', 'unassigned'])
+          .gte('created_at', thirtyDaysAgo),
+      ]);
+
+      if (assetsRes.error) throw assetsRes.error;
+      if (historyRes.error) throw historyRes.error;
+
+      const assets = assetsRes.data ?? [];
+      const history = historyRes.data ?? [];
+      const anomalies: AssetAnomaly[] = [];
+
+      for (const asset of assets) {
+        // 1. Frequent reassignment: 3+ assign/unassign events in 30 days
+        const recentMoves = history.filter(h => h.asset_id === asset.id).length;
+        if (recentMoves >= 3) {
+          anomalies.push({
+            assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
+            type: 'frequent_reassignment', severity: recentMoves >= 5 ? 'critical' : 'warning',
+            message: `Reassigned ${recentMoves} times in the last 30 days`,
+          });
+        }
+
+        // 2. Long maintenance: in maintenance for 30+ days
+        if (asset.status === 'maintenance') {
+          const updatedAt = new Date(asset.updated_at).getTime();
+          const daysSince = Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000));
+          if (daysSince >= 30) {
+            anomalies.push({
+              assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
+              type: 'long_maintenance', severity: daysSince >= 60 ? 'critical' : 'warning',
+              message: `In maintenance for ${daysSince} days`,
+            });
+          }
+        }
+
+        // 3. Inactive long: inactive/unassigned for 1+ year
+        if (asset.status === 'inactive') {
+          const updatedAt = new Date(asset.updated_at).getTime();
+          if (updatedAt < new Date(oneYearAgo).getTime()) {
+            const months = Math.floor((now - updatedAt) / (30 * 24 * 60 * 60 * 1000));
+            anomalies.push({
+              assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
+              type: 'inactive_long', severity: 'warning',
+              message: `Inactive for ${months} months — consider retiring`,
+            });
+          }
+        }
+
+        // 4. End of life: purchase_date + useful_life <= today
+        if (asset.purchase_date && asset.status !== 'retired') {
+          const usefulLife = USEFUL_LIFE[asset.category] ?? 5;
+          const purchaseYear = new Date(asset.purchase_date).getFullYear();
+          const eolYear = purchaseYear + usefulLife;
+          const currentYear = new Date().getFullYear();
+          if (currentYear >= eolYear) {
+            anomalies.push({
+              assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
+              type: 'end_of_life', severity: currentYear > eolYear ? 'critical' : 'warning',
+              message: `Reached end of life (${usefulLife}-year lifespan, purchased ${purchaseYear})`,
+            });
+          }
+        }
+
+        // 5. PM overdue: last_pm_date is more than 12 months ago, or next_pm_date is in the past
+        if (asset.status !== 'retired') {
+          const pmOverdue = asset.next_pm_date
+            ? new Date(asset.next_pm_date).getTime() < now
+            : asset.last_pm_date
+            ? new Date(asset.last_pm_date).getTime() < new Date(now - 365 * 24 * 60 * 60 * 1000).getTime()
+            : false;
+          if (pmOverdue) {
+            const msg = asset.next_pm_date
+              ? `Preventive maintenance was due on ${new Date(asset.next_pm_date).toLocaleDateString()}`
+              : `No preventive maintenance in over 12 months`;
+            anomalies.push({
+              assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
+              type: 'pm_overdue' as any, severity: 'warning',
+              message: msg,
+            });
+          }
+        }
+      }
+
+      return anomalies;
+    },
+  });
+}

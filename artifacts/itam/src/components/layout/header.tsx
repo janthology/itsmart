@@ -7,10 +7,10 @@ export function Header() {
   // Simple title generator based on route
   const getPageTitle = () => {
     if (location === '/dashboard') return 'Overview';
-    if (location.startsWith('/assets')) return 'Asset Management';
-    if (location.startsWith('/tickets')) return 'Support Tickets';
+    if (location.startsWith('/assets')) return 'IT Asset Management';
+    if (location.startsWith('/tickets')) return 'IT Support Management';
     if (location.startsWith('/admin/users')) return 'User Management';
-    if (location.startsWith('/admin/categories')) return 'Categories';
+    if (location.startsWith('/admin/categories')) return 'IT Asset Categories';
     if (location === '/profile') return 'My Profile';
     if (location === '/reports') return 'Reports';
     return '';

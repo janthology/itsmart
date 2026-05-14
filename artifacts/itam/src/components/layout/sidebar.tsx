@@ -3,8 +3,8 @@ import { useAuth } from "@/lib/auth-context";
 import { useSidebar } from "@/lib/sidebar-context";
 import {
   LayoutDashboard, MonitorSmartphone, TicketCheck,
-  Users, Tags, LogOut, UserCircle, FileBarChart2,
-  ChevronLeft, ChevronRight,
+  Users, Tags, LogOut, UserCircle, FileBarChart2, CalendarDays,
+  PanelLeftOpen, PanelLeftClose,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -20,6 +20,7 @@ export function Sidebar() {
     { href: "/assets",           label: "Assets",     icon: MonitorSmartphone },
     { href: "/tickets",          label: "Tickets",    icon: TicketCheck },
     { href: "/reports",          label: "Reports",    icon: FileBarChart2 },
+    { href: "/calendar",         label: "Calendar",   icon: CalendarDays },
     ...(isAdmin ? [
       { href: "/admin/users",      label: "Users",      icon: Users },
       { href: "/admin/categories", label: "Categories", icon: Tags },
@@ -132,7 +133,7 @@ export function Sidebar() {
           className="flex items-center justify-center w-full py-2 rounded-xl text-sidebar-foreground/50 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors mt-1"
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
+          {collapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
         </button>
       </div>
     </aside>

@@ -8,14 +8,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Search, Loader2, UserCog, UserCheck, UserX, KeyRound } from "lucide-react";
-import { format } from "date-fns";
+import { Search, Loader2, UserCog, UserCheck, UserX, KeyRound, UserPlus } from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
 import { supabase } from "@/lib/supabase";
 import { PageHeader } from "@/components/ui/page-header";
+import { SkeletonTable } from "@/components/ui/skeleton-table";
 
 export default function UsersManagement() {
   const { user, refreshUser } = useAuth();
@@ -34,7 +37,7 @@ export default function UsersManagement() {
       await updateMutation.mutateAsync({ id, data: { role: newRole } });
       toast({ title: "Role updated", description: "User permissions changed." });
       if (id === user?.id) await refreshUser();
-      queryClient.invalidateQueries({ queryKey: ['/api/users'] });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to update role." });
     }
@@ -51,18 +54,56 @@ export default function UsersManagement() {
 
   const [resettingId, setResettingId] = useState<string | null>(null);
 
-  const handleResetPassword = async (id: string) => {
-    setResettingId(id);
+  // ── Add User ──────────────────────────────────────────────────────────────
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
+  const [addingUser, setAddingUser] = useState(false);
+
+  const handleAddUser = async () => {
+    if (!newUser.email || !newUser.fullName) {
+      toast({ variant: "destructive", title: "Missing fields", description: "Email and full name are required." });
+      return;
+    }
+    setAddingUser(true);
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const res = await fetch(
-        "https://wngurnuozjzzdhveegjz.supabase.co/functions/v1/reset-password",
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${session?.access_token}`,
-            "apikey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InduZ3VybnVvemp6emRodmVlZ2p6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM5OTEzMjksImV4cCI6MjA4OTU2NzMyOX0.4Egd_5WWeZc7yivsQre4IVrIk25igJ0rRsCbwpimyXo",
+            "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
+          },
+          body: JSON.stringify(newUser),
+        }
+      );
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to create user");
+      toast({ title: "User created", description: `${newUser.fullName} has been added. Default password is "dostro2".` });
+      setAddUserOpen(false);
+      setNewUser({ email: "", fullName: "", department: "", role: "general_user" });
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Error", description: e.message || "Failed to create user." });
+    } finally {
+      setAddingUser(false);
+    }
+  };
+
+  const handleResetPassword = async (id: string) => {
+    setResettingId(id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/reset-password`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${session?.access_token}`,
+            "apikey": import.meta.env.VITE_SUPABASE_ANON_KEY,
           },
           body: JSON.stringify({ userId: id }),
         }
@@ -84,22 +125,72 @@ export default function UsersManagement() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <PageHeader title="Users" subtitle="Manage user accounts, roles, and access" />
-        <div className="flex items-center justify-between">
-          <div className="relative max-w-md w-full">
+        <PageHeader
+          title="Users"
+          subtitle="Manage user accounts, roles, and access"
+        />
+
+        {/* Add User Dialog */}
+        <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
+          <DialogContent className="sm:max-w-[460px] rounded-2xl border-0 shadow-2xl p-0">
+            <div className="px-6 py-6 bg-muted/30 border-b border-border">
+              <DialogHeader>
+                <DialogTitle className="text-xl font-display">Add New User</DialogTitle>
+                <DialogDescription>Create an account with the default password <span className="font-mono font-semibold text-foreground">dostro2</span>. The user will be prompted to change it on first login.</DialogDescription>
+              </DialogHeader>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="space-y-1.5">
+                <Label>Full Name</Label>
+                <Input placeholder="e.g. Juan dela Cruz" value={newUser.fullName} onChange={e => setNewUser(p => ({ ...p, fullName: e.target.value }))} className="rounded-xl h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Email Address</Label>
+                <Input type="email" placeholder="name@dost.gov.ph" value={newUser.email} onChange={e => setNewUser(p => ({ ...p, email: e.target.value }))} className="rounded-xl h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Department (Optional)</Label>
+                <Input placeholder="e.g. MIS" value={newUser.department} onChange={e => setNewUser(p => ({ ...p, department: e.target.value }))} className="rounded-xl h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Role</Label>
+                <Select value={newUser.role} onValueChange={v => setNewUser(p => ({ ...p, role: v }))}>
+                  <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.values(UserRole).map(r => (
+                      <SelectItem key={r} value={r}>{r.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setAddUserOpen(false)}>Cancel</Button>
+                <Button className="flex-1 rounded-xl" disabled={addingUser || !newUser.email || !newUser.fullName} onClick={handleAddUser}>
+                  {addingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserPlus className="w-4 h-4 mr-2" />}
+                  Create User
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+        <div className="flex items-center gap-2 max-w-xl">
+          <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-            <Input 
-              placeholder="Search users..." 
+            <Input
+              placeholder="Search users..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-10 h-11 rounded-xl bg-card border-border/50 shadow-sm"
             />
           </div>
+          <Button className="h-11 rounded-xl gap-2 shrink-0" onClick={() => setAddUserOpen(true)}>
+            <UserPlus className="w-4 h-4" /> Add User
+          </Button>
         </div>
 
         <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl overflow-hidden">
           {isLoading ? (
-             <div className="p-12 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>
+            <SkeletonTable rows={5} cols={6} />
           ) : (
             <Table>
               <TableHeader className="bg-muted/30">
@@ -107,6 +198,7 @@ export default function UsersManagement() {
                   <TableHead className="py-4 px-6">User</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Joined</TableHead>
+                  <TableHead>Last Login</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="px-6">Role / Access Level</TableHead>
                   <TableHead className="px-6">Actions</TableHead>
@@ -131,6 +223,11 @@ export default function UsersManagement() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {format(new Date(u.createdAt), 'MMM yyyy')}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {(u as any).lastSignInAt
+                        ? <span title={format(new Date((u as any).lastSignInAt), 'MMM d, yyyy h:mm a')}>{formatDistanceToNow(new Date((u as any).lastSignInAt), { addSuffix: true })}</span>
+                        : <span className="italic">Never</span>}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">

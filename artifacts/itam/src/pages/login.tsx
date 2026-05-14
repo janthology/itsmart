@@ -123,13 +123,7 @@ export default function Login() {
                 </Button>
               </form>
             </Form>
-            <div className="mt-8 text-center text-sm text-muted-foreground">
-              Don't have an account?{" "}
-              <Link href="/register" className="font-semibold text-primary hover:underline text-primary transition-colors">
-                Sign up
-              </Link>
-            </div>
-            <p className="mt-4 text-center text-sm text-muted-foreground">
+            <p className="mt-8 text-center text-sm text-muted-foreground">
               Forgot your password?{" "}
               <span className="font-semibold text-foreground">Contact your MIS Admin.</span>
             </p>
