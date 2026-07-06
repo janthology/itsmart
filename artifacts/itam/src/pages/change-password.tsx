@@ -24,8 +24,19 @@ function getStrength(pw: string): { score: number; label: string; color: string 
   return { score, label: "Strong", color: "bg-emerald-500" };
 }
 
+const PASSWORD_RULES = [
+  { id: 'length',    label: 'At least 8 characters',          test: (pw: string) => pw.length >= 8 },
+  { id: 'uppercase', label: 'At least one uppercase letter',   test: (pw: string) => /[A-Z]/.test(pw) },
+  { id: 'digit',     label: 'At least one number',             test: (pw: string) => /[0-9]/.test(pw) },
+  { id: 'special',   label: 'At least one special character',  test: (pw: string) => /[^A-Za-z0-9]/.test(pw) },
+];
+
+function passwordMeetsAllRules(pw: string): boolean {
+  return PASSWORD_RULES.every(r => r.test(pw));
+}
+
 export default function ChangePassword() {
-  const { user } = useAuth();
+  const { user, clearMustChangePassword, mustChangePassword } = useAuth();
   const { toast } = useToast();
   const [, setLocation] = useLocation();
 
@@ -36,7 +47,7 @@ export default function ChangePassword() {
   const [showNext, setShowNext] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const isMandatory = (user as any)?.mustChangePassword === true;
+  const isMandatory = mustChangePassword;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,11 +55,11 @@ export default function ChangePassword() {
       toast({ variant: "destructive", title: "Passwords don't match", description: "New password and confirmation must be identical." });
       return;
     }
-    if (next.length < 6) {
-      toast({ variant: "destructive", title: "Too short", description: "Password must be at least 6 characters." });
+    if (!passwordMeetsAllRules(next)) {
+      toast({ variant: "destructive", title: "Password too weak", description: "Password must be at least 8 characters and include an uppercase letter, a number, and a special character." });
       return;
     }
-    if (next === "dostro2") {
+    if (next.toLowerCase() === "dostro2") {
       toast({ variant: "destructive", title: "Choose a different password", description: "You cannot keep the default password." });
       return;
     }
@@ -78,6 +89,7 @@ export default function ChangePassword() {
       }
 
       toast({ title: "Password changed", description: "Your password has been updated successfully." });
+      clearMustChangePassword();
       setLocation("/dashboard");
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message || "Failed to change password." });
@@ -133,7 +145,7 @@ export default function ChangePassword() {
                     type={showNext ? "text" : "password"}
                     value={next}
                     onChange={e => setNext(e.target.value)}
-                    placeholder="At least 6 characters"
+                    placeholder="Min. 8 chars, uppercase, number, special char"
                     className="h-11 rounded-xl pr-10"
                     required
                   />
@@ -145,7 +157,8 @@ export default function ChangePassword() {
                 {next && (() => {
                   const s = getStrength(next);
                   return (
-                    <div className="space-y-1 pt-1">
+                    <div className="space-y-2 pt-1">
+                      {/* Strength bar */}
                       <div className="flex gap-1">
                         {[1,2,3,4].map(i => (
                           <div key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${i <= Math.ceil(s.score / 1.25) ? s.color : 'bg-muted'}`} />
@@ -154,6 +167,20 @@ export default function ChangePassword() {
                       <p className={`text-xs font-medium ${s.score <= 1 ? 'text-red-500' : s.score <= 2 ? 'text-amber-500' : s.score <= 3 ? 'text-blue-500' : 'text-emerald-500'}`}>
                         {s.label}
                       </p>
+                      {/* Per-rule checklist */}
+                      <ul className="space-y-1">
+                        {PASSWORD_RULES.map(rule => {
+                          const met = rule.test(next);
+                          return (
+                            <li key={rule.id} className={`flex items-center gap-1.5 text-xs ${met ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
+                              <span className={`w-3.5 h-3.5 rounded-full flex items-center justify-center shrink-0 ${met ? 'bg-emerald-500 text-white' : 'bg-muted border border-border'}`}>
+                                {met && <svg className="w-2 h-2" fill="none" viewBox="0 0 8 8"><path stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M1.5 4l2 2 3-3"/></svg>}
+                              </span>
+                              {rule.label}
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </div>
                   );
                 })()}
@@ -181,7 +208,7 @@ export default function ChangePassword() {
                     Cancel
                   </Button>
                 )}
-                <Button type="submit" disabled={loading || next !== confirm || !current || !next}
+                <Button type="submit" disabled={loading || next !== confirm || !current || !next || !passwordMeetsAllRules(next)}
                   className="flex-1 rounded-xl h-11 shadow-md shadow-primary/20">
                   {loading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <KeyRound className="w-4 h-4 mr-2" />}
                   Change Password

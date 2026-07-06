@@ -3,7 +3,6 @@ import { useLocation } from "wouter";
 import { useGetAssets, useGetTickets } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
-import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -86,10 +85,11 @@ export default function CalendarPage() {
         href: `/tickets/${t.id}`,
       });
 
-      // SLA deadline (only for open/in-progress)
+      // SLA deadline (only for open/in-progress) — shift deadline forward by accumulated hold time
       if (!['resolved', 'closed', 'on_hold'].includes(t.status)) {
         const targetHours = SLA_HOURS[t.priority] ?? 24;
-        const deadline = new Date(parseISO(t.createdAt).getTime() + targetHours * 60 * 60 * 1000);
+        const holdMs = ((t as any).totalHoldSeconds ?? 0) * 1000;
+        const deadline = new Date(parseISO(t.createdAt).getTime() + targetHours * 60 * 60 * 1000 + holdMs);
         evts.push({
           id: `t-due-${t.id}`,
           date: deadline,
@@ -189,7 +189,6 @@ export default function CalendarPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <PageHeader title="Calendar" subtitle="Scheduled events, SLA deadlines, and maintenance dates" />
 
         {/* Legend / filters */}
         <div className="flex flex-wrap gap-2">
@@ -368,3 +367,4 @@ export default function CalendarPage() {
     </AppLayout>
   );
 }
+

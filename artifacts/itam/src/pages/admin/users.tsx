@@ -17,20 +17,24 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
 import { supabase } from "@/lib/supabase";
-import { PageHeader } from "@/components/ui/page-header";
 import { SkeletonTable } from "@/components/ui/skeleton-table";
 
 export default function UsersManagement() {
   const { user, refreshUser } = useAuth();
-  if (user?.role !== 'administrator') return <Redirect to="/dashboard" />;
-
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  const [resettingId, setResettingId] = useState<string | null>(null);
+  const [addUserOpen, setAddUserOpen] = useState(false);
+  const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
+  const [addingUser, setAddingUser] = useState(false);
 
   const { data: users, isLoading } = useGetUsers({ query: { search: search || undefined } });
   const updateMutation = useUpdateUser();
   const toggleActiveMutation = useToggleUserActive();
+
+  // Role guard — after all hooks to satisfy Rules of Hooks
+  if (user?.role !== 'administrator') return <Redirect to="/dashboard" />;
 
   const handleRoleChange = async (id: string, newRole: UserRole) => {
     try {
@@ -52,13 +56,7 @@ export default function UsersManagement() {
     }
   };
 
-  const [resettingId, setResettingId] = useState<string | null>(null);
-
   // ── Add User ──────────────────────────────────────────────────────────────
-  const [addUserOpen, setAddUserOpen] = useState(false);
-  const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
-  const [addingUser, setAddingUser] = useState(false);
-
   const handleAddUser = async () => {
     if (!newUser.email || !newUser.fullName) {
       toast({ variant: "destructive", title: "Missing fields", description: "Email and full name are required." });
@@ -125,10 +123,6 @@ export default function UsersManagement() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <PageHeader
-          title="Users"
-          subtitle="Manage user accounts, roles, and access"
-        />
 
         {/* Add User Dialog */}
         <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
@@ -307,3 +301,4 @@ export default function UsersManagement() {
     </AppLayout>
   );
 }
+

@@ -17,12 +17,12 @@ import { supabase } from "@/lib/supabase";
 import { formatDistanceToNow, format } from "date-fns";
 
 const profileSchema = z.object({
-  fullName: z.string().min(2, "Full name is required"),
+  fullName: z.string().trim().min(2, "Full name is required"),
   department: z.string().optional().nullable(),
 });
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const updateMutation = useUpdateMyProfile();
@@ -44,7 +44,8 @@ export default function Profile() {
 
   const onSubmit = async (values: z.infer<typeof profileSchema>) => {
     try {
-      await updateMutation.mutateAsync({ data: values });
+      await updateMutation.mutateAsync({ data: { ...values, fullName: values.fullName.trim() } });
+      await refreshUser();
       toast({ title: "Profile updated", description: "Your details have been saved." });
       queryClient.invalidateQueries({ queryKey: ['currentUser'] });
     } catch (e) {

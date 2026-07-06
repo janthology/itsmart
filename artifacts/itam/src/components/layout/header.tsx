@@ -4,15 +4,16 @@ import { NotificationsBell } from "@/components/ui/notifications-bell";
 export function Header() {
   const [location] = useLocation();
 
-  // Simple title generator based on route
   const getPageTitle = () => {
-    if (location === '/dashboard') return 'Overview';
-    if (location.startsWith('/assets')) return 'IT Asset Management';
-    if (location.startsWith('/tickets')) return 'IT Support Management';
-    if (location.startsWith('/admin/users')) return 'User Management';
-    if (location.startsWith('/admin/categories')) return 'IT Asset Categories';
+    if (location === '/dashboard') return 'Dashboard';
+    if (location.startsWith('/assets')) return 'Assets';
+    if (location.startsWith('/tickets')) return 'Tickets';
+    if (location.startsWith('/admin/users')) return 'Users';
+    if (location.startsWith('/admin/categories')) return 'Categories';
     if (location === '/profile') return 'My Profile';
     if (location === '/reports') return 'Reports';
+    if (location === '/calendar') return 'Calendar';
+    if (location === '/change-password') return 'Change Password';
     return '';
   };
 

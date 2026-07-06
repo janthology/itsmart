@@ -32,7 +32,8 @@ const queryClient = new QueryClient({
 });
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, mustChangePassword } = useAuth();
+  const [location] = useLocation();
 
   if (isLoading) {
     return (
@@ -44,6 +45,11 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 
   if (!isAuthenticated) {
     return <Redirect to="/login" />;
+  }
+
+  // Block all pages except /change-password until the password is changed
+  if (mustChangePassword && location !== '/change-password') {
+    return <Redirect to="/change-password" />;
   }
 
   return <Component />;

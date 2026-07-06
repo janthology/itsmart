@@ -1,10 +1,9 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link, useSearch } from "wouter";
-import { useGetTickets, useCreateTicket, useGetSupportStaff, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
+import { useGetTickets, useCreateTicket, useGetSupportStaff, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { PageHeader } from "@/components/ui/page-header";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -78,6 +77,7 @@ export default function TicketsList() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [resolvedClosed, setResolvedClosed] = useState(false); // true = show resolved+closed together
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [assigneeFilter, setAssigneeFilter] = useState<string>("all");
   const [scope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
@@ -86,19 +86,61 @@ export default function TicketsList() {
   const [createSuccess, setCreateSuccess] = useState(false);
   const [assetComboOpen, setAssetComboOpen] = useState(false);
 
-  // Read ?status= from URL on mount (e.g. from dashboard card links)
+  // Keyboard shortcut: N = new ticket, / = focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === 'n' || e.key === 'N') { e.preventDefault(); setIsDialogOpen(true); }
+      if (e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // Read ?status=, ?scope= and ?assignedTo= from URL on mount (e.g. from dashboard card links)
   const searchString = useSearch();
   useEffect(() => {
     const params = new URLSearchParams(searchString);
     const s = params.get("status");
-    if (s && Object.keys(STATUS_LABEL).includes(s)) {
+    const sc = params.get("scope");
+    const at = params.get("assignedTo");
+
+    // resolved_closed is a virtual status meaning both resolved and closed —
+    // we show all when that value is present by leaving statusFilter as "all"
+    // but the query will include both; use "resolved" as the nearest single filter
+    // since the tickets page doesn't support multi-status. We set it to "all" and
+    // let the user see both resolved and closed naturally.
+    if (s === "resolved_closed") {
+      setResolvedClosed(true);
+      setStatusFilter("all");
+    } else if (s && Object.keys(STATUS_LABEL).includes(s)) {
+      setResolvedClosed(false);
       setStatusFilter(s);
+    } else if (!s) {
+      setResolvedClosed(false);
+      setStatusFilter("all");
+    }
+
+    // ?assignedTo=<userId> — admin "Assigned to Me" ticket card
+    if (at && isAdmin) {
+      setAssigneeFilter(at);
+      setScope("all");
+    } else if (sc === "mine") {
+      setScope("mine");
+    } else if (sc === "all") {
+      setScope("all");
+    } else if (!sc && isAdmin) {
       setScope("all");
     }
   }, [searchString]);
 
   const { data: assets } = useGetAssets();
   const { data: supportStaff } = useGetSupportStaff();
+  // All assignable staff — support staff + administrators, sorted by name
+  const { data: allUsers } = useGetUsers();
+  const assignableStaff = (allUsers ?? [])
+    .filter(u => u.role === 'support_staff' || u.role === 'administrator')
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
   const createMutation = useCreateTicket();
 
   const queryFilters: any = {
@@ -108,22 +150,28 @@ export default function TicketsList() {
   };
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
   if (scope === "mine") {
-    if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
-    if (isSupport) queryFilters.assignedTo = user?.id;
+    // Only apply personal filter when no explicit assignee filter is active
+    if (isAdmin && assigneeFilter === "all") queryFilters.assignedTo = user?.id;
+    else if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
+    else if (isSupport) queryFilters.assignedTo = user?.id;
   }
 
   const { data, isLoading } = useGetTickets({ query: queryFilters });
 
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [search, statusFilter, priorityFilter, assigneeFilter, scope]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, resolvedClosed, priorityFilter, assigneeFilter, scope]);
 
   const allTickets = useMemo(() => {
     let base = data?.data ?? [];
+    // Multi-status filter: resolved + closed together (from dashboard "Resolved & Closed" card)
+    if (resolvedClosed) {
+      base = base.filter(t => t.status === 'resolved' || t.status === 'closed');
+    }
     if (isAdmin && assigneeFilter === "unassigned") {
       base = base.filter(t => !t.assignedTo);
     }
     return base;
-  }, [data, isAdmin, assigneeFilter]);
+  }, [data, isAdmin, assigneeFilter, resolvedClosed]);
   const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const form = useForm<z.infer<typeof createTicketSchema>>({
@@ -146,15 +194,11 @@ export default function TicketsList() {
     }
   };
 
-  const hasActiveFilters = statusFilter !== "all" || priorityFilter !== "all" || (isAdmin && assigneeFilter !== "all") || search;
+  const hasActiveFilters = statusFilter !== "all" || resolvedClosed || priorityFilter !== "all" || (isAdmin && assigneeFilter !== "all") || search;
 
   return (
     <AppLayout>
       <div className="space-y-4">
-        <PageHeader
-          title="Support Tickets"
-          subtitle="Track and manage IT support requests"
-        />
         {/* Page header: scope toggle aligned with header title */}
         {!isAdmin && (
           <div className="flex justify-end">
@@ -190,6 +234,7 @@ export default function TicketsList() {
                   setSearch(val);
                   if (val) {
                     setStatusFilter("all");
+                    setResolvedClosed(false);
                     setPriorityFilter("all");
                     if (!isAdmin) setScope("all");
                   }
@@ -318,8 +363,16 @@ export default function TicketsList() {
 
           {/* Filters */}
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="h-10 w-[140px] rounded-xl text-sm border-border/50">
+            <Select value={resolvedClosed ? "resolved_closed" : statusFilter} onValueChange={v => {
+              if (v === "resolved_closed") {
+                setResolvedClosed(true);
+                setStatusFilter("all");
+              } else {
+                setResolvedClosed(false);
+                setStatusFilter(v);
+              }
+            }}>
+              <SelectTrigger className="h-10 w-[160px] rounded-xl text-sm border-border/50">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
@@ -327,6 +380,7 @@ export default function TicketsList() {
                 {Object.keys(STATUS_LABEL).map(s => (
                   <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
                 ))}
+                <SelectItem value="resolved_closed">Resolved & Closed</SelectItem>
               </SelectContent>
             </Select>
 
@@ -350,7 +404,7 @@ export default function TicketsList() {
                 <SelectContent>
                   <SelectItem value="all">All Assignees</SelectItem>
                   <SelectItem value="unassigned">Unassigned</SelectItem>
-                  {supportStaff?.map(s => (
+                  {assignableStaff.map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.fullName}</SelectItem>
                   ))}
                 </SelectContent>
@@ -359,7 +413,7 @@ export default function TicketsList() {
 
             {hasActiveFilters && (
               <Button variant="ghost" size="sm" className="h-10 px-3 rounded-xl text-muted-foreground"
-                onClick={() => { setSearch(""); setStatusFilter("all"); setPriorityFilter("all"); setAssigneeFilter("all"); }}>
+                onClick={() => { setSearch(""); setStatusFilter("all"); setResolvedClosed(false); setPriorityFilter("all"); setAssigneeFilter("all"); }}>
                 <X className="w-4 h-4 mr-1" /> Clear
               </Button>
             )}
@@ -370,11 +424,12 @@ export default function TicketsList() {
         {hasActiveFilters && (
           <div className="flex gap-2 flex-wrap">
             {search && <Badge variant="secondary" className="rounded-lg">Search: "{search}"</Badge>}
-            {statusFilter !== "all" && <Badge variant="secondary" className="rounded-lg">Status: {STATUS_LABEL[statusFilter]}</Badge>}
+            {resolvedClosed && <Badge variant="secondary" className="rounded-lg">Status: Resolved &amp; Closed</Badge>}
+            {!resolvedClosed && statusFilter !== "all" && <Badge variant="secondary" className="rounded-lg">Status: {STATUS_LABEL[statusFilter]}</Badge>}
             {priorityFilter !== "all" && <Badge variant="secondary" className="rounded-lg">Priority: {PRIORITY_LABEL[priorityFilter]}</Badge>}
             {isAdmin && assigneeFilter !== "all" && (
               <Badge variant="secondary" className="rounded-lg">
-                Assigned To: {assigneeFilter === "unassigned" ? "Unassigned" : supportStaff?.find(s => s.id === assigneeFilter)?.fullName ?? assigneeFilter}
+                Assigned To: {assigneeFilter === "unassigned" ? "Unassigned" : assignableStaff.find(s => s.id === assigneeFilter)?.fullName ?? assigneeFilter}
               </Badge>
             )}
           </div>
@@ -440,7 +495,7 @@ export default function TicketsList() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <SLABadge variant="compact" priority={ticket.priority} createdAt={ticket.createdAt} resolvedAt={(ticket as any).resolvedAt} ticketStatus={ticket.status} totalHoldSeconds={(ticket as any).totalHoldSeconds} onHoldAt={(ticket as any).onHoldAt} />
+                        <SLABadge variant="compact" priority={ticket.priority} createdAt={ticket.createdAt} resolvedAt={(ticket as any).resolvedAt} closedAt={(ticket as any).closedAt} ticketStatus={ticket.status} totalHoldSeconds={(ticket as any).totalHoldSeconds} onHoldAt={(ticket as any).onHoldAt} />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
@@ -484,3 +539,4 @@ export default function TicketsList() {
     </AppLayout>
   );
 }
+

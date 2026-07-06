@@ -197,15 +197,14 @@ export function useGetAssets(opts?: { query?: { search?: string; status?: AssetS
       let q = supabase.from('assets').select(ASSET_SELECT).order('created_at', { ascending: false });
       // Only apply server-side text filter when NOT searching (search is handled client-side
       // so category enum can be included in the match)
-      if (!search) {
-        if (status) q = q.eq('status', status);
-        if (category) q = q.eq('category', category);
-        if (assignedTo) q = q.eq('assigned_to', assignedTo);
-      } else {
-        // When searching, still apply non-text filters server-side
-        if (status) q = q.eq('status', status);
-        if (assignedTo) q = q.eq('assigned_to', assignedTo);
-      }
+      // Always apply non-text filters server-side
+      if (status) q = q.eq('status', status);
+      if (assignedTo) q = q.eq('assigned_to', assignedTo);
+      // Category is applied server-side when there's no search term; when
+      // searching, it's re-applied client-side after the text filter so that
+      // both conditions are respected together.
+      if (!search && category) q = q.eq('category', category);
+
       const { data, error } = await q;
       if (error) throw error;
       let assets = (data ?? []).map(mapAsset);
@@ -217,6 +216,8 @@ export function useGetAssets(opts?: { query?: { search?: string; status?: AssetS
           a.assetTag.toLowerCase().includes(term) ||
           a.category.toLowerCase().includes(term)
         );
+        // Re-apply category filter when search is also active
+        if (category) assets = assets.filter(a => a.category === category);
       }
       return { data: assets, total: assets.length, page: 1, limit: 100 };
     },
@@ -247,14 +248,14 @@ export function useCreateAsset() {
         category: data.category,
         status: data.status,
         assigned_to: data.assignedToId ?? null,
-        purchase_date: data.purchaseDate ?? null,
+        purchase_date: data.purchaseDate || null,
         purchase_value: (data as any).purchaseValue ?? null,
         notes: data.notes ?? null,
         serial_number: (data as any).serialNumber ?? null,
         location: (data as any).location ?? null,
         model: (data as any).model ?? null,
-        last_pm_date: (data as any).lastPmDate ?? null,
-        next_pm_date: (data as any).nextPmDate ?? null,
+        last_pm_date: (data as any).lastPmDate || null,
+        next_pm_date: (data as any).nextPmDate || null,
       }).select().single();
       if (error) throw error;
       return row;
@@ -562,8 +563,16 @@ export function useUpdateMyProfile() {
       const updates: any = {};
       if (data.fullName !== undefined) updates.full_name = data.fullName;
       if (data.department !== undefined) updates.department = data.department;
+      // Update profiles table
       const { error } = await supabase.from('profiles').update(updates).eq('id', user.id);
       if (error) throw error;
+      // Also update user_metadata so the JWT reflects the new name immediately
+      await supabase.auth.updateUser({
+        data: {
+          full_name: data.fullName ?? user.user_metadata?.full_name,
+          department: data.department ?? user.user_metadata?.department,
+        }
+      });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['currentUser'] }),
   });
@@ -615,19 +624,58 @@ export function useGetDashboardStats() {
     queryKey: ['dashboardStats'],
     enabled: !!authed,
     queryFn: async () => {
-      const [assetsRes, ticketsRes, usersRes, recentTicketsRes] = await Promise.all([
-        supabase.from('assets').select('status, assigned_to'),
-        supabase.from('tickets').select('status'),
-        supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        supabase.from('tickets').select(TICKET_SELECT)
-          .order('created_at', { ascending: false }).limit(5),
-      ]);
+      const { data: { user } } = await supabase.auth.getUser();
+      const role = user?.app_metadata?.role ?? 'general_user';
+      const userId = user?.id;
 
-      if (assetsRes.error) throw assetsRes.error;
+      // Ticket queries scoped by role
+      let ticketsQ = supabase.from('tickets').select('status');
+      let recentQ = supabase.from('tickets').select(TICKET_SELECT)
+        .order('created_at', { ascending: false }).limit(5);
+
+      if (role === 'support_staff' && userId) {
+        ticketsQ = ticketsQ.eq('assigned_to', userId);
+        recentQ = recentQ.eq('assigned_to', userId);
+      } else if (role === 'general_user' && userId) {
+        ticketsQ = ticketsQ.eq('created_by', userId);
+        recentQ = recentQ.eq('created_by', userId);
+      }
+
+      const [ticketsRes, recentTicketsRes] = await Promise.all([ticketsQ, recentQ]);
       if (ticketsRes.error) throw ticketsRes.error;
       if (recentTicketsRes.error) throw recentTicketsRes.error;
 
-      const assets = assetsRes.data ?? [];
+      // For admin: also fetch count of tickets assigned to them personally
+      let myTickets = 0;
+      if (role === 'administrator' && userId) {
+        const { count } = await supabase
+          .from('tickets').select('id', { count: 'exact', head: true })
+          .eq('assigned_to', userId);
+        myTickets = count ?? 0;
+      }
+      // Asset counts — admin and support staff get org-wide; support/general also get personal assigned count
+      let assets: any[] = [];
+      let userCount = 0;
+      let myAssignedAssets = 0;
+
+      if (role === 'administrator' || role === 'support_staff') {
+        const [assetsRes, usersRes] = await Promise.all([
+          supabase.from('assets').select('status, assigned_to'),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        ]);
+        if (assetsRes.error) throw assetsRes.error;
+        assets = assetsRes.data ?? [];
+        userCount = usersRes.count ?? 0;
+      }
+
+      // Personal assigned asset count for all non-admin roles (and admin too for "Assets Assigned to Me")
+      if (userId) {
+        const { count } = await supabase
+          .from('assets').select('id', { count: 'exact', head: true })
+          .eq('assigned_to', userId);
+        myAssignedAssets = count ?? 0;
+      }
+
       const tickets = ticketsRes.data ?? [];
 
       return {
@@ -640,7 +688,11 @@ export function useGetDashboardStats() {
         openTickets: tickets.filter((t: any) => t.status === 'open').length,
         inProgressTickets: tickets.filter((t: any) => t.status === 'in_progress').length,
         resolvedTickets: tickets.filter((t: any) => t.status === 'resolved' || t.status === 'closed').length,
-        totalUsers: usersRes.count ?? 0,
+        totalTickets: tickets.length,
+        allTickets: tickets.length,  // alias used by admin "All Tickets" card
+        myTickets,
+        myAssignedAssets,
+        totalUsers: userCount,
         recentTickets: (recentTicketsRes.data ?? []).map(mapTicket),
         recentAssets: [],
       };
@@ -730,7 +782,7 @@ export function useGetStaffWorkload() {
     queryFn: async () => {
       const [staffRes, ticketsRes] = await Promise.all([
         supabase.from('profiles').select('id, full_name').eq('role', 'support_staff').order('full_name'),
-        supabase.from('tickets').select('assigned_to, status').in('status', ['in_progress', 'on_hold']),
+        supabase.from('tickets').select('assigned_to, status').in('status', ['open', 'in_progress', 'on_hold']),
       ]);
       if (staffRes.error) throw staffRes.error;
       if (ticketsRes.error) throw ticketsRes.error;
@@ -740,7 +792,7 @@ export function useGetStaffWorkload() {
         return {
           id: s.id,
           fullName: s.full_name,
-          openCount: 0,
+          openCount: mine.filter((t: any) => t.status === 'open').length,
           inProgressCount: mine.filter((t: any) => t.status === 'in_progress').length,
           onHoldCount: mine.filter((t: any) => t.status === 'on_hold').length,
           totalActive: mine.length,
@@ -852,11 +904,11 @@ export function useGetAssetHistoryAll(opts?: { from?: string; to?: string }) {
   });
 }
 
-export function useGetUserActivity() {
+export function useGetUserActivity(opts?: { enabled?: boolean }) {
   const { data: authed } = useHasSession();
   return useQuery<any[]>({
     queryKey: ['userActivity'],
-    enabled: !!authed,
+    enabled: !!authed && (opts?.enabled ?? true),
     queryFn: async () => {
       const [usersRes, assetsRes, ticketsRes] = await Promise.all([
         supabase.from('profiles').select('*').order('full_name'),
@@ -886,11 +938,11 @@ export function useGetUserActivity() {
   });
 }
 
-export function useGetAllTicketsForReport() {
+export function useGetAllTicketsForReport(opts?: { enabled?: boolean }) {
   const { data: authed } = useHasSession();
   return useQuery<any[]>({
     queryKey: ['allTicketsReport'],
-    enabled: !!authed,
+    enabled: !!authed && (opts?.enabled ?? true),
     queryFn: async () => {
       const { data, error } = await supabase
         .from('tickets')
@@ -935,7 +987,7 @@ export function useGetAssetAnomalies() {
       const oneYearAgo = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
 
       const [assetsRes, historyRes] = await Promise.all([
-        supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at'),
+        supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at, last_pm_date, next_pm_date'),
         supabase.from('asset_history')
           .select('asset_id, action, created_at')
           .in('action', ['assigned', 'unassigned'])
@@ -1022,6 +1074,92 @@ export function useGetAssetAnomalies() {
       }
 
       return anomalies;
+    },
+  });
+}
+
+// ─── ASSET TAG AUTO-GENERATION ───────────────────────────────────────────────
+
+export async function generateNextAssetTag(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `DOST02-ITA${year}`;
+
+  const { data } = await supabase
+    .from('assets')
+    .select('asset_tag')
+    .ilike('asset_tag', `${prefix}%`)
+    .order('asset_tag', { ascending: false })
+    .limit(1);
+
+  if (!data || data.length === 0) return `${prefix}000001`;
+
+  const last = data[0].asset_tag as string;
+  const numPart = last.replace(prefix, '');
+  const num = parseInt(numPart, 10);
+  const next = isNaN(num) ? 1 : num + 1;
+  return `${prefix}${String(next).padStart(6, '0')}`;
+}
+
+// ─── ASSET MAINTENANCE LOG ────────────────────────────────────────────────────
+
+export interface MaintenanceLogEntry {
+  id: string;
+  assetId: string;
+  performedBy: { id: string; fullName: string } | null;
+  performedAt: string;
+  description: string | null;
+  createdBy: { id: string; fullName: string } | null;
+  createdAt: string;
+}
+
+export function useGetMaintenanceLog(assetId: string) {
+  const { data: authed } = useHasSession();
+  return useQuery<MaintenanceLogEntry[]>({
+    queryKey: ['maintenanceLog', assetId],
+    enabled: !!authed && !!assetId,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('asset_maintenance_log')
+        .select(`
+          *,
+          performed_by_profile:profiles!asset_maintenance_log_performed_by_fkey(id, full_name),
+          created_by_profile:profiles!asset_maintenance_log_created_by_fkey(id, full_name)
+        `)
+        .eq('asset_id', assetId)
+        .order('performed_at', { ascending: false });
+      if (error) throw error;
+      return (data ?? []).map((r: any) => ({
+        id: r.id,
+        assetId: r.asset_id,
+        performedBy: r.performed_by_profile ? { id: r.performed_by_profile.id, fullName: r.performed_by_profile.full_name } : null,
+        performedAt: r.performed_at,
+        description: r.description ?? null,
+        createdBy: r.created_by_profile ? { id: r.created_by_profile.id, fullName: r.created_by_profile.full_name } : null,
+        createdAt: r.created_at,
+      }));
+    },
+  });
+}
+
+export function useAddMaintenanceLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assetId, performedById, performedAt, description }: {
+      assetId: string; performedById?: string; performedAt: string; description?: string;
+    }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      const { error } = await supabase.from('asset_maintenance_log').insert({
+        asset_id: assetId,
+        performed_by: performedById ?? null,
+        performed_at: performedAt,
+        description: description ?? null,
+        created_by: user?.id ?? null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_d, { assetId }) => {
+      qc.invalidateQueries({ queryKey: ['maintenanceLog', assetId] });
+      qc.invalidateQueries({ queryKey: ['asset', assetId] });
     },
   });
 }

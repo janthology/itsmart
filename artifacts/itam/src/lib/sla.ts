@@ -47,11 +47,14 @@ export function computeSLA(
   ticketStatus: string,
   totalHoldSeconds = 0,
   onHoldAt: string | null | undefined = null,
+  closedAt: string | null | undefined = null,
 ): SLAInfo {
   const targetHours = SLA_HOURS[priority] ?? 24;
   const created = new Date(createdAt);
 
-  const referenceTime = resolvedAt ? new Date(resolvedAt) : new Date();
+  // Use resolvedAt first, then closedAt, then now() for active tickets
+  const terminalTime = resolvedAt ?? closedAt;
+  const referenceTime = terminalTime ? new Date(terminalTime) : new Date();
   const totalElapsedMs = referenceTime.getTime() - created.getTime();
 
   // Accumulate current hold period if still on hold

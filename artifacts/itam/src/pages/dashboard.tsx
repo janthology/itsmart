@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { useGetDashboardStats, useGetStaffWorkload, useGetTicketTrend, useGetAssetAnomalies } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/ui/page-header";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Monitor, TicketIcon, CheckCircle2, AlertCircle, Loader2, ArrowRight, PackageX, Clock, Users, AlertTriangle, Wrench, Archive, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -15,7 +16,8 @@ export default function Dashboard() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'administrator';
   const { data: staffWorkload = [] } = useGetStaffWorkload();
-  const { data: ticketTrend = [] } = useGetTicketTrend(8);
+  const [trendWeeks, setTrendWeeks] = useState(8);
+  const { data: ticketTrend = [] } = useGetTicketTrend(trendWeeks);
   const { data: assetAnomalies = [] } = useGetAssetAnomalies();
 
   if (isLoading) {
@@ -38,13 +40,33 @@ export default function Dashboard() {
     );
   }
 
-  const statCards = [
-    { title: "Total Assets",        value: stats.totalAssets,                    icon: Monitor,       color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/assets" },
-    { title: "Active Assets",       value: (stats as any).assignedAssets ?? 0,   icon: CheckCircle2,  color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/assets?status=active" },
-    { title: "Inactive Assets",     value: (stats as any).inactiveAssets ?? 0,   icon: PackageX,      color: "text-slate-500",   bg: "bg-slate-500/10",   href: "/assets?status=inactive" },
-    { title: "Open Tickets",        value: stats.openTickets,                    icon: AlertCircle,   color: "text-amber-500",   bg: "bg-amber-500/10",   href: "/tickets?status=open" },
-    { title: "In Progress Tickets", value: (stats as any).inProgressTickets ?? 0,icon: Clock,         color: "text-sky-500",     bg: "bg-sky-500/10",     href: "/tickets?status=in_progress" },
-    { title: "Resolved & Closed",   value: stats.resolvedTickets,                icon: TicketIcon,    color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets" },
+  const isSupport = user?.role === 'support_staff';
+  const isGeneral = user?.role === 'general_user';
+
+  // KPI cards — role-specific
+  const statCards = isAdmin ? [
+    { title: "Total Assets",             value: stats.totalAssets,                      icon: Monitor,      color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/assets?scope=all" },
+    { title: "Active Assets",            value: (stats as any).availableAssets ?? 0,    icon: CheckCircle2, color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/assets?status=active&scope=all" },
+    { title: "Inactive Assets",          value: (stats as any).inactiveAssets ?? 0,     icon: PackageX,     color: "text-slate-500",   bg: "bg-slate-500/10",   href: "/assets?status=inactive&scope=all" },
+    { title: "Assets Assigned to Me",    value: (stats as any).myAssignedAssets ?? 0,   icon: Monitor,      color: "text-violet-500",  bg: "bg-violet-500/10",  href: "/assets?scope=mine" },
+    { title: "All Tickets",              value: (stats as any).allTickets ?? 0,          icon: TicketIcon,   color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/tickets?scope=all" },
+    { title: "Open Tickets",             value: stats.openTickets,                      icon: AlertCircle,  color: "text-amber-500",   bg: "bg-amber-500/10",   href: "/tickets?status=open&scope=all" },
+    { title: "In Progress Tickets",      value: (stats as any).inProgressTickets ?? 0,  icon: Clock,        color: "text-sky-500",     bg: "bg-sky-500/10",     href: "/tickets?status=in_progress&scope=all" },
+    { title: "Resolved & Closed",        value: stats.resolvedTickets,                  icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets?status=resolved_closed&scope=all" },
+    { title: "Tickets Assigned to Me",   value: (stats as any).myTickets ?? 0,          icon: Clock,        color: "text-violet-500",  bg: "bg-violet-500/10",  href: `/tickets?assignedTo=${user?.id}` },
+  ] : isSupport ? [
+    { title: "Total Assets",          value: stats.totalAssets,                      icon: Monitor,      color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/assets?scope=all" },
+    { title: "Active Assets",         value: (stats as any).availableAssets ?? 0,    icon: CheckCircle2, color: "text-blue-500",    bg: "bg-blue-500/10",    href: "/assets?status=active&scope=all" },
+    { title: "Inactive Assets",       value: (stats as any).inactiveAssets ?? 0,     icon: PackageX,     color: "text-slate-500",   bg: "bg-slate-500/10",   href: "/assets?status=inactive&scope=all" },
+    { title: "Assets Assigned to Me", value: (stats as any).myAssignedAssets ?? 0,   icon: Monitor,      color: "text-violet-500",  bg: "bg-violet-500/10",  href: "/assets?scope=mine" },
+    { title: "Open Tickets",          value: stats.openTickets,                      icon: AlertCircle,  color: "text-amber-500",   bg: "bg-amber-500/10",   href: "/tickets?status=open&scope=all" },
+    { title: "All Assigned Tickets",  value: (stats as any).totalTickets ?? 0,       icon: TicketIcon,   color: "text-sky-500",     bg: "bg-sky-500/10",     href: "/tickets?scope=mine" },
+    { title: "Resolved & Closed",     value: stats.resolvedTickets,                  icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets?status=resolved_closed&scope=mine" },
+  ] : /* general_user */ [
+    { title: "Assets Assigned to Me", value: (stats as any).myAssignedAssets ?? 0,   icon: Monitor,      color: "text-indigo-500",  bg: "bg-indigo-500/10",  href: "/assets?scope=mine" },
+    { title: "My Open Tickets",       value: stats.openTickets,                      icon: AlertCircle,  color: "text-amber-500",   bg: "bg-amber-500/10",   href: "/tickets?status=open&scope=mine" },
+    { title: "My Tickets",            value: (stats as any).totalTickets ?? 0,       icon: TicketIcon,   color: "text-sky-500",     bg: "bg-sky-500/10",     href: "/tickets?scope=mine" },
+    { title: "Resolved & Closed",     value: stats.resolvedTickets,                  icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10", href: "/tickets?status=resolved_closed&scope=mine" },
   ];
 
   const container = {
@@ -63,7 +85,6 @@ export default function Dashboard() {
   return (
     <AppLayout>
       <motion.div variants={container} initial="hidden" animate="show" className="space-y-8">
-        <PageHeader title="Dashboard" subtitle="Overview of your IT assets and support tickets" />
         
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -88,13 +109,15 @@ export default function Dashboard() {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className={`grid grid-cols-1 ${!isGeneral ? 'lg:grid-cols-3' : ''} gap-8`}>
           
           {/* Recent Tickets */}
-          <motion.div variants={item} className="lg:col-span-2">
+          <motion.div variants={item} className={!isGeneral ? 'lg:col-span-2' : ''}>
             <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl h-full flex flex-col">
               <CardHeader className="flex flex-row items-center justify-between pb-2 border-b border-border/50 px-6 py-5">
-                <CardTitle className="text-lg font-display">Recent Tickets</CardTitle>
+                <CardTitle className="text-lg font-display">
+                  {isGeneral ? 'My Recent Tickets' : isSupport ? 'Recently Assigned Tickets' : 'Recent Tickets'}
+                </CardTitle>
                 <Link href="/tickets" className="text-sm font-medium text-primary hover:text-primary/80 flex items-center gap-1 group">
                   View all <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </Link>
@@ -134,7 +157,8 @@ export default function Dashboard() {
             </Card>
           </motion.div>
 
-          {/* Asset Status Breakdown */}
+          {/* Asset Status Breakdown — admin and support staff only */}
+          {!isGeneral && (
           <motion.div variants={item}>
             <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl h-full">
               <CardHeader className="border-b border-border/50 px-6 py-5">
@@ -167,6 +191,7 @@ export default function Dashboard() {
               </CardContent>
             </Card>
           </motion.div>
+          )}
         </div>
 
         {/* Ticket Trend Chart */}
@@ -177,11 +202,24 @@ export default function Dashboard() {
                 <CardTitle className="text-lg font-display flex items-center gap-2">
                   <TicketIcon className="w-5 h-5 text-primary" /> Ticket Trends
                 </CardTitle>
-                {ticketTrend.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    {ticketTrend[0]?.week} – {ticketTrend[ticketTrend.length - 1]?.week}
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  {ticketTrend.length > 0 && (
+                    <span className="text-xs text-muted-foreground hidden sm:block">
+                      {ticketTrend[0]?.week} – {ticketTrend[ticketTrend.length - 1]?.week}
+                    </span>
+                  )}
+                  <Select value={String(trendWeeks)} onValueChange={v => setTrendWeeks(Number(v))}>
+                    <SelectTrigger className="h-8 w-[110px] rounded-lg text-xs border-border/50">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="4">4 weeks</SelectItem>
+                      <SelectItem value="8">8 weeks</SelectItem>
+                      <SelectItem value="12">3 months</SelectItem>
+                      <SelectItem value="24">6 months</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-6">
@@ -321,3 +359,4 @@ export default function Dashboard() {
     </AppLayout>
   );
 }
+

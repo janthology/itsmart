@@ -38,8 +38,8 @@ export function Sidebar() {
           <img src="/dostlogo.png" alt="DOST Logo" className="w-8 h-8 object-contain shrink-0" />
           {!collapsed && (
             <div className="flex flex-col leading-tight">
-              <span className="font-display font-bold text-sm tracking-tight">IT Support and</span>
-              <span className="font-display font-bold text-sm tracking-tight">Asset Management</span>
+              <span className="font-display font-bold text-base tracking-tight text-sidebar-foreground">ITSMART</span>
+              <span className="font-display text-xs tracking-tight text-sidebar-foreground/60">IT Asset & Support Mgmt</span>
             </div>
           )}
         </div>

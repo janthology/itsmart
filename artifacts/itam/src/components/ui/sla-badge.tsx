@@ -7,6 +7,7 @@ interface SLABadgeProps {
   priority: string;
   createdAt: string;
   resolvedAt?: string | null;
+  closedAt?: string | null;
   ticketStatus: string;
   totalHoldSeconds?: number;
   onHoldAt?: string | null;
@@ -30,8 +31,8 @@ const STATUS_ICON = {
   pending:  Clock,
 };
 
-export function SLABadge({ priority, createdAt, resolvedAt, ticketStatus, totalHoldSeconds = 0, onHoldAt, variant = "compact", className }: SLABadgeProps) {
-  const sla = computeSLA(priority, createdAt, resolvedAt, ticketStatus, totalHoldSeconds, onHoldAt);
+export function SLABadge({ priority, createdAt, resolvedAt, closedAt, ticketStatus, totalHoldSeconds = 0, onHoldAt, variant = "compact", className }: SLABadgeProps) {
+  const sla = computeSLA(priority, createdAt, resolvedAt, ticketStatus, totalHoldSeconds, onHoldAt, closedAt);
   const styles = STATUS_STYLES[sla.status];
   const Icon = STATUS_ICON[sla.status];
 
@@ -47,7 +48,6 @@ export function SLABadge({ priority, createdAt, resolvedAt, ticketStatus, totalH
     );
   }
 
-  // Full card variant
   const barWidth = Math.min(sla.percentUsed, 100);
 
   return (
@@ -59,19 +59,13 @@ export function SLABadge({ priority, createdAt, resolvedAt, ticketStatus, totalH
         </div>
         <span className={cn("text-xs font-medium", styles.text)}>{sla.label}</span>
       </div>
-
-      {/* Progress bar */}
       <div className="h-1.5 w-full bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
-        <div
-          className={cn("h-full rounded-full transition-all duration-500", styles.bar)}
-          style={{ width: `${barWidth}%` }}
-        />
+        <div className={cn("h-full rounded-full transition-all duration-500", styles.bar)} style={{ width: `${barWidth}%` }} />
       </div>
-
       <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
         <div>
           <p className="font-medium text-foreground/70 uppercase tracking-wide text-[10px] mb-0.5">Target</p>
-          <p className="font-semibold">{SLA_HOURS[priority]}h ({priority})</p>
+          <p className="font-semibold">{SLA_HOURS[priority] ?? sla.targetHours}h ({priority})</p>
         </div>
         <div>
           <p className="font-medium text-foreground/70 uppercase tracking-wide text-[10px] mb-0.5">Deadline</p>

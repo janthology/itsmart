@@ -1,10 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Link, useSearch } from "wouter";
-import { useGetAssets, useCreateAsset, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
+import { useGetAssets, useCreateAsset, useAddAssetHistory, AssetCategory, AssetStatus, generateNextAssetTag } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { PageHeader } from "@/components/ui/page-header";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -48,35 +47,10 @@ export default function AssetsList() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [scope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
+  const [assignedToFilter, setAssignedToFilter] = useState<string | undefined>(undefined);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [createSuccess, setCreateSuccess] = useState(false);
-
-  // Read ?status= from URL on mount (e.g. from dashboard card links)
-  const searchString = useSearch();
-  useEffect(() => {
-    const params = new URLSearchParams(searchString);
-    const s = params.get("status");
-    if (s && Object.values(AssetStatus).includes(s as AssetStatus)) {
-      setStatusFilter(s);
-    }
-  }, [searchString]);
-
-  const queryFilters: any = {
-    search: search || undefined,
-    status: statusFilter !== "all" ? statusFilter as AssetStatus : undefined,
-    category: categoryFilter !== "all" ? categoryFilter as AssetCategory : undefined,
-  };
-  if (!isAdmin && scope === "mine") queryFilters.assignedTo = user?.id;
-
-  const { data, isLoading } = useGetAssets({ query: queryFilters });
-  const createMutation = useCreateAsset();
-
-  // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [search, statusFilter, categoryFilter, scope]);
-
-  const allAssets = data?.data ?? [];
-  const pagedAssets = allAssets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const form = useForm<z.infer<typeof createAssetSchema>>({
     resolver: zodResolver(createAssetSchema),
@@ -87,9 +61,76 @@ export default function AssetsList() {
     },
   });
 
+  // Keyboard shortcut: N = new asset (admin only), / = focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if ((e.key === 'n' || e.key === 'N') && isAdmin) { e.preventDefault(); setIsDialogOpen(true); generateNextAssetTag().then(tag => form.setValue('assetTag', tag)); }
+      if (e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isAdmin]);
+
+  // Read ?status=, ?assignedTo=, ?scope= from URL on every navigation
+  // Explicitly reset to defaults when params are absent so sidebar link /assets always shows all assets
+  const searchString = useSearch();
+  useEffect(() => {
+    const params = new URLSearchParams(searchString);
+    const s = params.get("status");
+    const at = params.get("assignedTo");
+    const sc = params.get("scope");
+
+    setStatusFilter(s && Object.values(AssetStatus).includes(s as AssetStatus) ? s : "all");
+    setAssignedToFilter(at ?? undefined);
+
+    if (at) {
+      setScope("all");
+    } else if (sc === "mine") {
+      setScope("mine");
+    } else if (sc === "all") {
+      setScope("all");
+    } else {
+      // No scope param — admin defaults to "all", non-admin defaults to "mine"
+      setScope(isAdmin ? "all" : "mine");
+    }
+  }, [searchString]);
+
+  const queryFilters: any = {
+    search: search || undefined,
+    status: statusFilter !== "all" ? statusFilter as AssetStatus : undefined,
+    category: categoryFilter !== "all" ? categoryFilter as AssetCategory : undefined,
+  };
+  // assignedToFilter takes precedence (set from URL param, e.g. admin "Assets Assigned to Me" card)
+  if (assignedToFilter) {
+    queryFilters.assignedTo = assignedToFilter;
+  } else if (scope === "mine") {
+    // Works for all roles — admin, support staff, general user
+    queryFilters.assignedTo = user?.id;
+  }
+
+  const { data, isLoading } = useGetAssets({ query: queryFilters });
+  const createMutation = useCreateAsset();
+  const addHistory = useAddAssetHistory();
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1); }, [search, statusFilter, categoryFilter, scope]);
+
+  const allAssets = data?.data ?? [];
+  const pagedAssets = allAssets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const onSubmit = async (values: z.infer<typeof createAssetSchema>) => {
     try {
-      await createMutation.mutateAsync({ data: values as any });
+      const newAsset = await createMutation.mutateAsync({ data: values as any });
+      // Log creation event
+      if (newAsset?.id) {
+        await addHistory.mutateAsync({
+          assetId: newAsset.id,
+          action: 'created',
+          fieldName: 'Asset',
+          oldValue: undefined,
+          newValue: `${values.assetTag} — ${values.name}`,
+        });
+      }
       setCreateSuccess(true);
       queryClient.invalidateQueries({ queryKey: ['assets'] });
       setTimeout(() => {
@@ -105,29 +146,24 @@ export default function AssetsList() {
   return (
     <AppLayout>
       <div className="space-y-4">
-        <PageHeader
-          title="Assets"
-          subtitle="Manage and track your IT inventory"
-        />
         {/* Scope toggle for non-admins */}
-        {!isAdmin && (
-          <div className="flex justify-end">
-            <div className="flex rounded-xl border border-border/50 overflow-hidden h-9">
-              <button
-                onClick={() => setScope("mine")}
-                className={`px-4 text-sm font-medium transition-colors ${scope === "mine" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
-              >
-                Assigned to Me
-              </button>
-              <button
-                onClick={() => setScope("all")}
-                className={`px-4 text-sm font-medium transition-colors ${scope === "all" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
-              >
-                All Assets
-              </button>
-            </div>
+        {/* Scope toggle — all roles including admin */}
+        <div className="flex justify-end">
+          <div className="flex rounded-xl border border-border/50 overflow-hidden h-9">
+            <button
+              onClick={() => { setScope("mine"); setAssignedToFilter(undefined); }}
+              className={`px-4 text-sm font-medium transition-colors ${scope === "mine" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+            >
+              Assigned to Me
+            </button>
+            <button
+              onClick={() => { setScope("all"); setAssignedToFilter(undefined); }}
+              className={`px-4 text-sm font-medium transition-colors ${scope === "all" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+            >
+              All Assets
+            </button>
           </div>
-        )}
+        </div>
 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-2 w-full max-w-xl">
@@ -145,7 +181,13 @@ export default function AssetsList() {
             </div>
 
             {isAdmin && (
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <Dialog open={isDialogOpen} onOpenChange={async (open) => {
+                setIsDialogOpen(open);
+                if (open) {
+                  const tag = await generateNextAssetTag();
+                  form.setValue('assetTag', tag);
+                }
+              }}>
                 <DialogTrigger asChild>
                   <Button className="h-11 rounded-xl bg-primary hover:bg-primary/90 shadow-md shadow-primary/20 shrink-0">
                     <Plus className="w-5 h-5 mr-2" /> New Asset
@@ -163,7 +205,13 @@ export default function AssetsList() {
                     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
                         <FormField control={form.control} name="assetTag" render={({ field }) => (
-                          <FormItem><FormLabel>Asset Tag</FormLabel><FormControl><Input placeholder="e.g. IT-1001" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                          <FormItem>
+                            <FormLabel>Asset Tag</FormLabel>
+                            <FormControl>
+                              <Input {...field} readOnly className="rounded-xl bg-muted/50 text-muted-foreground font-mono cursor-not-allowed" />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
                         )} />
                         <FormField control={form.control} name="name" render={({ field }) => (
                           <FormItem><FormLabel>Asset Name</FormLabel><FormControl><Input placeholder="e.g. Dell Laptop" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
@@ -289,7 +337,7 @@ export default function AssetsList() {
                   : "No assets have been assigned to you yet."}
               </p>
               {isAdmin && !(search || statusFilter !== "all" || categoryFilter !== "all") && (
-                <Button className="rounded-xl gap-2" onClick={() => setIsDialogOpen(true)}>
+                <Button className="rounded-xl gap-2" onClick={async () => { setIsDialogOpen(true); const tag = await generateNextAssetTag(); form.setValue('assetTag', tag); }}>
                   <PackagePlus className="w-4 h-4" /> Add First Asset
                 </Button>
               )}
@@ -360,4 +408,5 @@ export default function AssetsList() {
     </AppLayout>
   );
 }
+
 

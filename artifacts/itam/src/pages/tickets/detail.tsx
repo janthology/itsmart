@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
+import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Loader2, ArrowLeft, Send, MessageSquare, Clock, ShieldAlert, MonitorSmartphone, UserCheck, AlertTriangle, Star } from "lucide-react";
+import { Loader2, ArrowLeft, Send, MessageSquare, Clock, ShieldAlert, MonitorSmartphone, UserCheck, AlertTriangle, Star, Copy, Check, Printer } from "lucide-react";
 import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -52,7 +52,7 @@ function getAllowedTransitions(current: string, role: Role): string[] {
       open:        ['in_progress', 'closed'],
       in_progress: ['open', 'on_hold', 'resolved'],
       on_hold:     ['in_progress'],
-      resolved:    ['in_progress'],
+      resolved:    ['in_progress', 'closed'],
       closed:      [],
     };
     return map[current] ?? [];
@@ -78,13 +78,16 @@ export default function TicketDetail() {
   const updateMutation = useUpdateTicket();
   const commentMutation = useAddTicketComment();
   const { data: supportStaff } = useGetSupportStaff();
+  const { data: allUsers } = useGetUsers();
+  // Assignable staff = support staff + administrators, for both the dropdown and workload ranking
+  const assignableStaff = (allUsers ?? []).filter(u => u.role === 'support_staff' || u.role === 'administrator');
   const { data: staffWorkload = [] } = useGetStaffWorkload();
   const satisfactionMutation = useSubmitSatisfactionRating();
 
-  // Smart routing: rank staff by workload (fewer active = better) 
+  // Smart routing: rank assignable staff by workload (fewer active = better)
   const rankedStaff = useMemo(() => {
-    if (!supportStaff) return [];
-    return [...supportStaff].sort((a, b) => {
+    if (!assignableStaff.length) return [];
+    return [...assignableStaff].sort((a, b) => {
       const aLoad = staffWorkload.find(w => w.id === a.id)?.totalActive ?? 0;
       const bLoad = staffWorkload.find(w => w.id === b.id)?.totalActive ?? 0;
       return aLoad - bLoad; // lowest workload first
@@ -92,6 +95,8 @@ export default function TicketDetail() {
   }, [supportStaff, staffWorkload]);
 
   const [commentText, setCommentText] = useState("");
+  const [copied, setCopied] = useState(false);
+  const MAX_COMMENT = 1000;
   const [hoverRating, setHoverRating] = useState(0);
   const [selectedRating, setSelectedRating] = useState(0);
   const [satisfactionComment, setSatisfactionComment] = useState("");
@@ -143,7 +148,7 @@ export default function TicketDetail() {
       await updateMutation.mutateAsync({ id, data: updates });
 
       const assigneeName = assigneeId
-        ? (supportStaff?.find(s => s.id === assigneeId)?.fullName ?? (user?.id === assigneeId ? user?.fullName : 'Unknown'))
+        ? (assignableStaff.find(s => s.id === assigneeId)?.fullName ?? (user?.id === assigneeId ? user?.fullName : 'Unknown'))
         : null;
       const remark = assigneeId
         ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}. Status set to "in progress".`
@@ -190,6 +195,89 @@ export default function TicketDetail() {
       toast({ variant: "destructive", title: "Error", description: "Failed to submit rating." });
     }
   };
+
+  const handleCopyTicketNumber = () => {
+    const num = (ticket as any)?.ticketNumber ?? ticket?.id?.substring(0, 8) ?? '';
+
+    // navigator.clipboard only works on secure contexts (HTTPS / localhost).
+    // For plain HTTP (LAN dev server), fall back to the legacy execCommand approach.
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(num).then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }).catch(() => fallbackCopy(num));
+    } else {
+      fallbackCopy(num);
+    }
+  };
+
+  const fallbackCopy = (text: string) => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    ta.style.top = '-9999px';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    try {
+      document.execCommand('copy');
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // execCommand also failed — nothing we can do silently
+    } finally {
+      document.body.removeChild(ta);
+    }
+  };
+
+  const handlePrint = () => {
+    if (!ticket) return;
+    const win = window.open('', '_blank', 'width=800,height=900');
+    if (!win) return;
+    const comments = ticket.comments.map(c => `
+      <div style="margin-bottom:12px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
+          <strong>${c.createdBy.fullName}</strong>
+          <span style="color:#64748b;font-size:12px;">${format(new Date(c.createdAt), 'MMM d, yyyy h:mm a')}</span>
+        </div>
+        <p style="margin:0;white-space:pre-wrap;font-size:13px;">${c.commentText}</p>
+      </div>`).join('');
+    win.document.write(`<!DOCTYPE html><html><head><title>${(ticket as any).ticketNumber ?? ticket.id}</title>
+      <style>body{font-family:Arial,sans-serif;padding:32px;max-width:800px;margin:0 auto;color:#1e293b;}
+      h1{font-size:20px;margin-bottom:4px;}
+      .meta{color:#64748b;font-size:13px;margin-bottom:24px;}
+      .badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:600;margin-right:6px;}
+      .desc{background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:24px;white-space:pre-wrap;font-size:14px;}
+      @media print{body{padding:16px;}}</style></head><body>
+      <p style="color:#355872;font-weight:700;font-size:13px;margin-bottom:8px;">ITSMART — Support Ticket</p>
+      <h1>${ticket.title}</h1>
+      <p class="meta">
+        <span class="badge" style="background:#dbeafe;color:#1e40af;">${(ticket as any).ticketNumber ?? ticket.id.substring(0,8)}</span>
+        <span class="badge" style="background:#fef3c7;color:#92400e;">${ticket.priority}</span>
+        <span class="badge" style="background:#e0f2fe;color:#0369a1;">${ticket.status.replace(/_/g,' ')}</span>
+        &nbsp;|&nbsp; Opened by ${ticket.createdBy.fullName} on ${format(new Date(ticket.createdAt), 'MMMM d, yyyy h:mm a')}
+        ${ticket.assignedTo ? `&nbsp;|&nbsp; Assigned to ${ticket.assignedTo.fullName}` : ''}
+      </p>
+      <div class="desc">${ticket.description}</div>
+      <h2 style="font-size:15px;margin-bottom:12px;">Activity Log (${ticket.comments.length} entries)</h2>
+      ${comments}
+      <p style="color:#94a3b8;font-size:11px;margin-top:24px;">Printed on ${format(new Date(), 'MMMM d, yyyy h:mm a')}</p>
+      <script>window.onload=()=>{window.print();}<\/script></body></html>`);
+    win.document.close();
+  };
+
+  // Keyboard shortcut: N = new ticket (handled on list page), / = focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && (pendingStatus || pendingPriority)) {
+        setPendingStatus(null);
+        setPendingPriority(null);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [pendingStatus, pendingPriority]);
 
   if (isLoading) return <AppLayout><div className="flex h-64 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div></AppLayout>;
   if (isError || !ticket) return <AppLayout><div className="text-center p-8 text-destructive">Ticket not found.</div></AppLayout>;
@@ -273,10 +361,24 @@ export default function TicketDetail() {
               <CardHeader className="bg-muted/20 border-b border-border/50 pb-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-mono text-muted-foreground">{(ticket as any).ticketNumber ?? `#${ticket.id.substring(0, 8)}`}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-mono text-muted-foreground">{(ticket as any).ticketNumber ?? `#${ticket.id.substring(0, 8)}`}</p>
+                      <button
+                        onClick={handleCopyTicketNumber}
+                        className="text-muted-foreground hover:text-foreground transition-colors"
+                        title="Copy ticket number"
+                      >
+                        {copied ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                     <CardTitle className="text-2xl font-display leading-tight">{ticket.title}</CardTitle>
                   </div>
                   <div className="flex flex-col gap-2 items-end">
+                    <div className="flex gap-2">
+                      <Button variant="ghost" size="sm" className="h-8 px-2 rounded-lg text-muted-foreground hover:text-foreground" onClick={handlePrint} title="Print ticket">
+                        <Printer className="w-4 h-4" />
+                      </Button>
+                    </div>
                     <StatusBadge status={ticket.priority} />
                     <StatusBadge status={ticket.status} />
                   </div>
@@ -350,10 +452,13 @@ export default function TicketDetail() {
                     <Textarea
                       placeholder="Type your reply here..."
                       value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      className="min-h-[100px] mb-4 border-border/50 focus-visible:ring-primary/20 rounded-lg resize-none"
+                      onChange={(e) => setCommentText(e.target.value.slice(0, MAX_COMMENT))}
+                      className="min-h-[100px] mb-2 border-border/50 focus-visible:ring-primary/20 rounded-lg resize-none"
                     />
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs ${commentText.length >= MAX_COMMENT ? 'text-destructive' : 'text-muted-foreground'}`}>
+                        {commentText.length}/{MAX_COMMENT}
+                      </span>
                       <Button
                         onClick={handleAddComment}
                         disabled={!commentText.trim() || commentMutation.isPending}
@@ -377,10 +482,30 @@ export default function TicketDetail() {
               priority={ticket.priority}
               createdAt={ticket.createdAt}
               resolvedAt={(ticket as any).resolvedAt}
+              closedAt={(ticket as any).closedAt}
               ticketStatus={ticket.status}
               totalHoldSeconds={(ticket as any).totalHoldSeconds}
               onHoldAt={(ticket as any).onHoldAt}
             />
+
+            {/* Assigned staff — visible to general users */}
+            {!canManage && (
+              <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
+                <CardContent className="p-4 flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <UserCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">Assigned To</p>
+                    {ticket.assignedTo ? (
+                      <p className="text-sm font-semibold text-foreground">{ticket.assignedTo.fullName}</p>
+                    ) : (
+                      <p className="text-sm text-muted-foreground italic">Unassigned</p>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {(canManage || (ticket.status === 'resolved' && ticket.createdBy.id === user?.id)) && (
               <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">

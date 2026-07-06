@@ -6,6 +6,7 @@ import { SidebarProvider, useSidebar } from "@/lib/sidebar-context";
 import { Redirect } from "wouter";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BackToTop } from "@/components/ui/back-to-top";
 
 function AppLayoutInner({ children }: { children: ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
@@ -33,6 +34,7 @@ function AppLayoutInner({ children }: { children: ReactNode }) {
             {children}
           </div>
         </main>
+        <BackToTop />
       </div>
     </div>
   );

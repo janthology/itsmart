@@ -28,7 +28,6 @@ import { useToast } from "@/hooks/use-toast";
 import { isWithinInterval, parseISO, startOfDay, endOfDay, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { SLA_HOURS } from "@/lib/sla";
-import { PageHeader } from "@/components/ui/page-header";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -208,6 +207,9 @@ export default function Reports() {
   const needsTickets = activeId === "ticket_list";
   const needsHistory = activeId === "asset_history";
 
+  const needsAllTickets = ["ticket_performance", "ticket_satisfaction"].includes(activeId);
+  const needsUserActivity = activeId === "user_activity";
+
   const { data: assetsData, isLoading: assetsLoading } = useGetAssets({
     query: needsAssets ? { status: assetStatus !== "all" ? assetStatus as AssetStatus : undefined } : {},
   });
@@ -219,8 +221,8 @@ export default function Reports() {
   if (isSupport) ticketQuery.assignedTo = user?.id;
   const { data: ticketsData, isLoading: ticketsLoading } = useGetTickets({ query: needsTickets ? ticketQuery : {} });
   const { data: historyData = [], isLoading: historyLoading } = useGetAssetHistoryAll(needsHistory ? { from: histFrom || undefined, to: histTo || undefined } : {});
-  const { data: allTicketsData = [], isLoading: allTicketsLoading } = useGetAllTicketsForReport();
-  const { data: userActivity = [], isLoading: userActivityLoading } = useGetUserActivity();
+  const { data: allTicketsData = [], isLoading: allTicketsLoading } = useGetAllTicketsForReport({ enabled: needsAllTickets });
+  const { data: userActivity = [], isLoading: userActivityLoading } = useGetUserActivity({ enabled: needsUserActivity });
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const assets = useMemo(() => applyDateFilter(assetsData?.data ?? [], assetFrom, assetTo), [assetsData, assetFrom, assetTo]);
@@ -326,7 +328,6 @@ export default function Reports() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <PageHeader title="Reports" subtitle="Export and analyze asset and ticket data" />
         <div className="flex gap-6 items-start">
 
           {/* Left nav */}
@@ -490,4 +491,5 @@ export default function Reports() {
     </AppLayout>
   );
 }
+
 

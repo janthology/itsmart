@@ -15,7 +15,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
 import { useAuth } from "@/lib/auth-context";
-import { PageHeader } from "@/components/ui/page-header";
 
 const createCategorySchema = z.object({
   name: z.string().min(1, "Name is required"),
@@ -24,8 +23,6 @@ const createCategorySchema = z.object({
 
 export default function CategoriesManagement() {
   const { user } = useAuth();
-  if (user?.role !== 'administrator') return <Redirect to="/dashboard" />;
-
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -39,13 +36,16 @@ export default function CategoriesManagement() {
     defaultValues: { name: "", type: "asset" }
   });
 
+  // Role guard — after all hooks to satisfy Rules of Hooks
+  if (user?.role !== 'administrator') return <Redirect to="/dashboard" />;
+
   const onSubmit = async (values: z.infer<typeof createCategorySchema>) => {
     try {
       await createMutation.mutateAsync({ data: values });
       toast({ title: "Success", description: "Category created." });
       setIsDialogOpen(false);
       form.reset();
-      queryClient.invalidateQueries({ queryKey: ['/api/categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to create category." });
     }
@@ -56,7 +56,7 @@ export default function CategoriesManagement() {
     try {
       await deleteMutation.mutateAsync({ id });
       toast({ title: "Deleted", description: "Category removed." });
-      queryClient.invalidateQueries({ queryKey: ['/api/categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
     } catch (e) {
       toast({ variant: "destructive", title: "Error", description: "Failed to delete category." });
     }
@@ -65,16 +65,13 @@ export default function CategoriesManagement() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        <PageHeader
-          title="Categories"
-          subtitle="Define custom categories for asset classification"
-          action={
-            <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="h-10 rounded-xl bg-primary hover:bg-primary/90 shadow-md shadow-primary/20">
-                  <Plus className="w-4 h-4 mr-2" /> Add Category
-                </Button>
-              </DialogTrigger>
+        <div className="flex justify-end">
+          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="h-10 rounded-xl bg-primary hover:bg-primary/90 shadow-md shadow-primary/20">
+                <Plus className="w-4 h-4 mr-2" /> Add Category
+              </Button>
+            </DialogTrigger>
             <DialogContent className="sm:max-w-[400px] rounded-2xl border-0 shadow-2xl">
               <DialogHeader>
                 <DialogTitle>New Category</DialogTitle>
@@ -97,8 +94,7 @@ export default function CategoriesManagement() {
               </Form>
             </DialogContent>
           </Dialog>
-          }
-        />
+        </div>
 
         <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl overflow-hidden">
           {isLoading ? (
@@ -134,3 +130,4 @@ export default function CategoriesManagement() {
     </AppLayout>
   );
 }
+

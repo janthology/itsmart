@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
+import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, useGetMaintenanceLog, useAddMaintenanceLog, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, ArrowLeft, ArchiveX, Edit2, MonitorSmartphone, Calendar, User, Save, MapPin, Hash, UserMinus, History } from "lucide-react";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Loader2, ArrowLeft, ArchiveX, Edit2, MonitorSmartphone, Calendar, User, Save, MapPin, Hash, UserMinus, History, Wrench, Plus } from "lucide-react";
 import { format } from "date-fns";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
@@ -57,13 +59,31 @@ export default function AssetDetail() {
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [assignUserId, setAssignUserId] = useState<string>("");
-  const [activeTab, setActiveTab] = useState<"details" | "history">("details");
+  const [activeTab, setActiveTab] = useState<"details" | "history" | "maintenance">("details");
+  const [retireDialogOpen, setRetireDialogOpen] = useState(false);
+  const [retireRemarks, setRetireRemarks] = useState("");
+
+  // Warn on browser/tab close when editing
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isEditing) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [isEditing]);
 
   const { data: asset, isLoading, isError } = useGetAsset(id);
   const updateMutation = useUpdateAsset();
   const { data: allUsers } = useGetUsers();
   const { data: history = [], isLoading: historyLoading } = useGetAssetHistory(id);
   const addHistory = useAddAssetHistory();
+  const { data: maintenanceLog = [], isLoading: maintenanceLoading } = useGetMaintenanceLog(id);
+  const addMaintenance = useAddMaintenanceLog();
+
+  const [newPmDate, setNewPmDate] = useState("");
+  const [newPmPerformedBy, setNewPmPerformedBy] = useState("");
+  const [newPmDescription, setNewPmDescription] = useState("");
+  const [addingPm, setAddingPm] = useState(false);
 
   const a = asset as any;
 
@@ -107,9 +127,21 @@ export default function AssetDetail() {
           if (newVal !== String(oldVal)) changes.push({ fieldName: label, oldValue: oldVal, newValue: newVal });
         }
       }
-      await updateMutation.mutateAsync({ id, data: values as any });
+      // If status changed to inactive/maintenance/retired, fold the unassign into
+      // the same update call to avoid a redundant round-trip.
+      const needsUnassign = ['inactive', 'maintenance', 'retired'].includes(values.status) && !!asset?.assignedTo;
+      const updatePayload: any = { ...values, ...(needsUnassign ? { assignedToId: null } : {}) };
+      await updateMutation.mutateAsync({ id, data: updatePayload });
+      if (needsUnassign) {
+        await addHistory.mutateAsync({
+          assetId: id, action: 'unassigned', fieldName: 'Assigned To',
+          oldValue: asset!.assignedTo!.fullName, newValue: 'Unassigned',
+        });
+      }
       for (const c of changes) {
-        await addHistory.mutateAsync({ assetId: id, action: 'field_updated', ...c });
+        // Use dedicated action for status changes to make them stand out in the audit log
+        const action = c.fieldName === 'Status' ? 'status_changed' : 'field_updated';
+        await addHistory.mutateAsync({ assetId: id, action, ...c });
       }
       toast({ title: "Success", description: "Asset updated successfully." });
       setIsEditing(false);
@@ -150,16 +182,67 @@ export default function AssetDetail() {
   const handleRetire = async () => {
     const prevStatus = asset?.status ?? '';
     const prevAssignee = asset?.assignedTo?.fullName ?? null;
+    const remarks = retireRemarks.trim();
     try {
       await updateMutation.mutateAsync({ id, data: { status: 'retired', assignedToId: null } as any });
-      await addHistory.mutateAsync({ assetId: id, action: 'retired', fieldName: 'Status', oldValue: prevStatus, newValue: 'retired' });
+      // Status change entry
+      await addHistory.mutateAsync({
+        assetId: id, action: 'retired', fieldName: 'Status',
+        oldValue: prevStatus, newValue: 'retired',
+      });
+      // Separate remarks entry so it renders clearly in the history tab
+      if (remarks) {
+        await addHistory.mutateAsync({
+          assetId: id, action: 'retire_remarks', fieldName: 'Remarks',
+          oldValue: undefined, newValue: remarks,
+        });
+      }
       if (prevAssignee) {
         await addHistory.mutateAsync({ assetId: id, action: 'unassigned', fieldName: 'Assigned To', oldValue: prevAssignee, newValue: 'Unassigned' });
       }
       toast({ title: "Asset retired", description: `${asset?.assetTag} has been marked as retired and unassigned.` });
+      setRetireDialogOpen(false);
+      setRetireRemarks("");
       queryClient.invalidateQueries({ queryKey: ['asset', id] });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message || "Failed to retire asset." });
+    }
+  };
+
+  // PM interval in months by category
+  const PM_INTERVAL_MONTHS: Record<string, number> = {
+    server: 3, networking: 3,
+    laptop: 6, desktop: 6, printer: 6,
+    monitor: 12, phone: 12, tablet: 12, peripheral: 12, other: 12,
+  };
+
+  const handleAddMaintenance = async () => {
+    if (!newPmDate) return;
+    setAddingPm(true);
+    try {
+      // Calculate next PM date based on category interval
+      const intervalMonths = PM_INTERVAL_MONTHS[asset?.category ?? 'other'] ?? 6;
+      const nextDate = new Date(newPmDate);
+      nextDate.setMonth(nextDate.getMonth() + intervalMonths);
+      const nextPmDateStr = nextDate.toISOString().split('T')[0];
+
+      await addMaintenance.mutateAsync({
+        assetId: id,
+        performedById: newPmPerformedBy || undefined,
+        performedAt: newPmDate,
+        description: newPmDescription || undefined,
+      });
+      // Update last_pm_date and next_pm_date on the asset
+      await updateMutation.mutateAsync({ id, data: { lastPmDate: newPmDate, nextPmDate: nextPmDateStr } as any });
+      await addHistory.mutateAsync({ assetId: id, action: 'pm_recorded', fieldName: 'Last PM Date', oldValue: a.lastPmDate ?? '', newValue: newPmDate });
+      await addHistory.mutateAsync({ assetId: id, action: 'pm_scheduled', fieldName: 'Next PM Date', oldValue: a.nextPmDate ?? '', newValue: nextPmDateStr });
+      toast({ title: "Maintenance logged", description: `PM recorded. Next PM scheduled for ${nextDate.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}.` });
+      setNewPmDate(""); setNewPmPerformedBy(""); setNewPmDescription("");
+      queryClient.invalidateQueries({ queryKey: ['asset', id] });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Error", description: error.message || "Failed to log maintenance." });
+    } finally {
+      setAddingPm(false);
     }
   };
 
@@ -179,31 +262,55 @@ export default function AssetDetail() {
                 <Edit2 className="w-4 h-4 mr-2" /> Edit Asset
               </Button>
               {asset.status !== 'retired' && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" className="rounded-xl shadow-sm border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20">
-                      <ArchiveX className="w-4 h-4 mr-2" /> Retire Asset
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent className="rounded-2xl">
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Retire this asset?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Asset <span className="font-mono font-semibold text-foreground">{asset.assetTag}</span> will be marked as <span className="font-semibold">Retired</span> and unassigned. The record is preserved for audit purposes. This action can be undone by editing the asset status.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={handleRetire}
-                        className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl"
-                        disabled={updateMutation.isPending}
-                      >
-                        {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Retire Asset"}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => { setRetireRemarks(""); setRetireDialogOpen(true); }}
+                    className="rounded-xl shadow-sm border-amber-300 text-amber-700 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-400 dark:hover:bg-amber-900/20"
+                  >
+                    <ArchiveX className="w-4 h-4 mr-2" /> Retire Asset
+                  </Button>
+                  <Dialog open={retireDialogOpen} onOpenChange={setRetireDialogOpen}>
+                    <DialogContent className="rounded-2xl sm:max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Retire this asset?</DialogTitle>
+                        <DialogDescription>
+                          Asset <span className="font-mono font-semibold text-foreground">{asset.assetTag}</span> will be marked as <span className="font-semibold">Retired</span> and unassigned. The record is preserved for audit purposes. This action can be undone by editing the asset status.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-2 py-2">
+                        <Label htmlFor="retire-remarks" className="text-sm font-medium">
+                          Remarks <span className="text-muted-foreground font-normal">(optional)</span>
+                        </Label>
+                        <Textarea
+                          id="retire-remarks"
+                          placeholder="e.g. End of useful life, hardware failure, replaced by newer unit…"
+                          value={retireRemarks}
+                          onChange={e => setRetireRemarks(e.target.value)}
+                          className="rounded-xl min-h-[90px] resize-none"
+                        />
+                      </div>
+                      <DialogFooter className="gap-2">
+                        <Button
+                          variant="outline"
+                          onClick={() => setRetireDialogOpen(false)}
+                          className="rounded-xl"
+                          disabled={updateMutation.isPending}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={handleRetire}
+                          className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl"
+                          disabled={updateMutation.isPending}
+                        >
+                          {updateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArchiveX className="w-4 h-4 mr-2" />}
+                          Retire Asset
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
+                </>
               )}
             </div>
           )}
@@ -239,6 +346,12 @@ export default function AssetDetail() {
               >
                 <History className="w-4 h-4" /> History {history.length > 0 && <span className="ml-1 bg-primary/10 text-primary text-xs px-1.5 py-0.5 rounded-full">{history.length}</span>}
               </button>
+              <button
+                onClick={() => setActiveTab("maintenance")}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors -mb-px ${activeTab === "maintenance" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              >
+                <Wrench className="w-4 h-4" /> Maintenance {maintenanceLog.length > 0 && <span className="ml-1 bg-primary/10 text-primary text-xs px-1.5 py-0.5 rounded-full">{maintenanceLog.length}</span>}
+              </button>
             </div>
 
             <CardContent className="px-8 pb-8 pt-6">
@@ -273,7 +386,19 @@ export default function AssetDetail() {
                           <FormLabel>Status</FormLabel>
                           <Select onValueChange={field.onChange} value={field.value}>
                             <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
-                            <SelectContent>{Object.values(AssetStatus).map(s => <SelectItem key={s} value={s}>{s.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</SelectItem>)}</SelectContent>
+                            <SelectContent>
+                              {Object.values(AssetStatus)
+                                // 'retired' is only reachable via the dedicated Retire button (which
+                                // prompts for remarks). Exclude it from the edit form to prevent
+                                // silent re-retirement without a remarks entry.
+                                .filter(s => s !== 'retired')
+                                .map(s => <SelectItem key={s} value={s}>{s.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</SelectItem>)}
+                              {/* If asset is already retired, keep the option so the current value
+                                  renders correctly — but it can't be re-selected */}
+                              {asset.status === 'retired' && (
+                                <SelectItem value="retired" disabled>Retired (use Retire button)</SelectItem>
+                              )}
+                            </SelectContent>
                           </Select>
                         </FormItem>
                       )} />
@@ -313,13 +438,13 @@ export default function AssetDetail() {
                   <div><p className="text-muted-foreground mb-1">Next PM Date</p><p className={`font-medium text-base ${a.nextPmDate && new Date(a.nextPmDate) < new Date() ? 'text-red-600 dark:text-red-400' : ''}`}>{a.nextPmDate ? format(new Date(a.nextPmDate), 'MMMM d, yyyy') : <span className="text-muted-foreground italic font-normal">—</span>}{a.nextPmDate && new Date(a.nextPmDate) < new Date() && <span className="ml-2 text-xs font-medium text-red-600 dark:text-red-400">Overdue</span>}</p></div>
                   <div className="col-span-2">
                     <p className="text-muted-foreground mb-2">Notes</p>
-                    <p className="font-medium bg-muted/30 p-4 rounded-xl border border-border/50 min-h-[80px]">
+                    <p className="font-medium bg-muted/30 p-4 rounded-xl border border-border/50 min-h-[80px] whitespace-pre-wrap">
                       {asset.notes || <span className="text-muted-foreground italic font-normal">No additional notes provided.</span>}
                     </p>
                   </div>
                 </div>
               )
-              ) : (
+              ) : activeTab === "history" ? (
                 /* History Tab */
                 <div className="space-y-1">
                   {historyLoading ? (
@@ -333,11 +458,15 @@ export default function AssetDetail() {
                     <div className="relative pl-6 border-l-2 border-border/50 space-y-5">
                       {history.map((entry) => {
                         const actionLabel: Record<string, string> = {
-                          assigned:      '👤 Assigned',
-                          unassigned:    '🔓 Unassigned',
-                          field_updated: '✏️ Updated',
-                          created:       '✅ Created',
-                          retired:       '📦 Retired',
+                          assigned:        '👤 Assigned',
+                          unassigned:      '🔓 Unassigned',
+                          field_updated:   '✏️ Updated',
+                          status_changed:  '🔄 Status Changed',
+                          created:         '✅ Created',
+                          retired:         '📦 Retired',
+                          retire_remarks:  '💬 Retirement Remarks',
+                          pm_recorded:     '🔧 PM Recorded',
+                          pm_scheduled:    '📅 PM Scheduled',
                         };
                         // Capitalize raw enum values for display
                         const formatValue = (v: string | null) =>
@@ -349,14 +478,18 @@ export default function AssetDetail() {
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <span className="font-semibold text-sm text-foreground">
                                   {actionLabel[entry.action.toLowerCase()] ?? entry.action.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                                  {entry.fieldName && <span className="text-muted-foreground font-normal"> — {entry.fieldName}</span>}
+                                  {entry.fieldName && entry.action !== 'retire_remarks' && <span className="text-muted-foreground font-normal"> — {entry.fieldName}</span>}
                                 </span>
                                 <span className="text-xs text-muted-foreground">{format(new Date(entry.createdAt), 'MMM d, yyyy h:mm a')}</span>
                               </div>
-                              {(entry.oldValue || entry.newValue) && (
-                                <div className="flex items-center gap-2 text-xs flex-wrap">
+                              {entry.action === 'retire_remarks' ? (
+                                <p className="text-sm text-foreground bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg px-3 py-2 whitespace-pre-wrap">
+                                  {entry.newValue}
+                                </p>
+                              ) : (entry.oldValue || entry.newValue) && (
+                                <div className="flex items-start gap-2 text-xs flex-wrap">
                                   {entry.oldValue && <span className="bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 px-2 py-0.5 rounded-md border border-red-200 dark:border-red-800 line-through">{formatValue(entry.oldValue) || '—'}</span>}
-                                  {entry.oldValue && entry.newValue && <span className="text-muted-foreground">→</span>}
+                                  {entry.oldValue && entry.newValue && <span className="text-muted-foreground shrink-0">→</span>}
                                   {entry.newValue && <span className="bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-md border border-green-200 dark:border-green-800">{formatValue(entry.newValue) || '—'}</span>}
                                 </div>
                               )}
@@ -367,6 +500,66 @@ export default function AssetDetail() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {activeTab === "maintenance" && (
+                <div className="space-y-5">
+                  {/* Add new PM record — admin only */}
+                  {isAdmin && (
+                    <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-3">
+                      <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Plus className="w-4 h-4 text-primary" /> Log Maintenance</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-muted-foreground">Date Performed</label>
+                          <Input type="date" value={newPmDate} onChange={e => setNewPmDate(e.target.value)} className="rounded-xl h-9 text-sm" />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-xs font-medium text-muted-foreground">Performed By</label>
+                          <select value={newPmPerformedBy} onChange={e => setNewPmPerformedBy(e.target.value)}
+                            className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm">
+                            <option value="">Select staff...</option>
+                            {(allUsers ?? []).filter(u => u.role === 'support_staff' || u.role === 'administrator').map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-medium text-muted-foreground">Description / Notes</label>
+                        <Textarea value={newPmDescription} onChange={e => setNewPmDescription(e.target.value)}
+                          placeholder="What was done during this maintenance..." className="rounded-xl min-h-[70px] text-sm resize-none" />
+                      </div>
+                      <Button size="sm" className="rounded-xl" disabled={!newPmDate || addingPm} onClick={handleAddMaintenance}>
+                        {addingPm ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Plus className="w-3 h-3 mr-2" />} Add Record
+                      </Button>
+                    </div>
+                  )}
+                  {/* Log entries */}
+                  {maintenanceLoading ? (
+                    <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                  ) : maintenanceLog.length === 0 ? (
+                    <div className="text-center py-10 text-muted-foreground">
+                      <Wrench className="w-10 h-10 mx-auto mb-3 text-muted" />
+                      <p>No maintenance records yet.</p>
+                    </div>
+                  ) : (
+                    <div className="relative pl-6 border-l-2 border-border/50 space-y-4">
+                      {maintenanceLog.map(entry => (
+                        <div key={entry.id} className="relative">
+                          <div className="absolute -left-[1.65rem] top-1 w-3 h-3 rounded-full bg-blue-300 border-2 border-blue-500" />
+                          <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-1.5">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <span className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                                <Wrench className="w-3.5 h-3.5 text-blue-500" /> Preventive Maintenance
+                              </span>
+                              <span className="text-xs text-muted-foreground">{format(new Date(entry.performedAt), 'MMM d, yyyy')}</span>
+                            </div>
+                            {entry.performedBy && <p className="text-xs text-muted-foreground">Performed by <span className="font-medium text-foreground">{entry.performedBy.fullName}</span></p>}
+                            {entry.description && <p className="text-sm text-foreground/80 mt-1">{entry.description}</p>}
+                            {entry.createdBy && <p className="text-[10px] text-muted-foreground/60">Logged by {entry.createdBy.fullName}</p>}
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -398,41 +591,49 @@ export default function AssetDetail() {
                 )}
                 {isAdmin && (
                   <div className="space-y-2 pt-2 border-t border-border/50">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reassign to</p>
-                    <Select value={assignUserId} onValueChange={setAssignUserId}>
-                      <SelectTrigger className="rounded-xl text-sm">
-                        <SelectValue placeholder="Select a user..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(allUsers ?? [])
-                          .filter(u => u.id !== asset.assignedTo?.id)
-                          .map(u => (
-                            <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
-                          ))
-                        }
-                      </SelectContent>
-                    </Select>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        className="flex-1 rounded-xl"
-                        disabled={!assignUserId || updateMutation.isPending}
-                        onClick={handleAssign}
-                      >
-                        {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Assign"}
-                      </Button>
-                      {asset.assignedTo && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-xl"
-                          disabled={updateMutation.isPending}
-                          onClick={handleUnassign}
-                        >
-                          <UserMinus className="w-3 h-3 mr-1" /> Unassign
-                        </Button>
-                      )}
-                    </div>
+                    {asset.status === 'retired' ? (
+                      <p className="text-xs text-muted-foreground italic text-center py-1">
+                        Assignment is locked for retired assets.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Reassign to</p>
+                        <Select value={assignUserId} onValueChange={setAssignUserId}>
+                          <SelectTrigger className="rounded-xl text-sm">
+                            <SelectValue placeholder="Select a user..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(allUsers ?? [])
+                              .filter(u => u.id !== asset.assignedTo?.id)
+                              .map(u => (
+                                <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
+                              ))
+                            }
+                          </SelectContent>
+                        </Select>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            className="flex-1 rounded-xl"
+                            disabled={!assignUserId || updateMutation.isPending}
+                            onClick={handleAssign}
+                          >
+                            {updateMutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Assign"}
+                          </Button>
+                          {asset.assignedTo && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-xl"
+                              disabled={updateMutation.isPending}
+                              onClick={handleUnassign}
+                            >
+                              <UserMinus className="w-3 h-3 mr-1" /> Unassign
+                            </Button>
+                          )}
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </CardContent>

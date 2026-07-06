@@ -38,10 +38,17 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/30 p-4 relative overflow-hidden">
-      {/* Decorative background elements */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[100px]" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-accent/10 rounded-full blur-[100px]" />
+    <div
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{
+        backgroundImage: "url('/loginbg.png')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+      }}
+    >
+      {/* Dark overlay so the card stays readable */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
 
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -49,8 +56,12 @@ export default function Login() {
         transition={{ duration: 0.5, ease: "easeOut" }}
         className="w-full max-w-md relative z-10"
       >
-        <div className="flex justify-center mb-8">
-          <img src="/dostlogo.png" alt="DOST Logo" className="w-20 h-20 object-contain drop-shadow-xl mx-auto" />
+        <div className="flex flex-col items-center mb-8 gap-3">
+          <img src="/dostlogo.png" alt="DOST Logo" className="w-20 h-20 object-contain drop-shadow-xl" />
+          <div className="text-center">
+            <h1 className="text-2xl font-display font-bold text-white tracking-tight drop-shadow-md">ITSMART</h1>
+            <p className="text-xs font-medium text-white/90 mt-0.5 drop-shadow-md text-center">Integrated Technology Support, Maintenance &amp; Asset Resource Tracker</p>
+          </div>
         </div>
 
         <Card className="border-0 shadow-2xl bg-card/80 backdrop-blur-xl">
