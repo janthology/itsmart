@@ -61,8 +61,8 @@ function getRowHighlight(status: string, priority: string): string {
 }
 
 const createTicketSchema = z.object({
-  title: z.string().min(1, "Title is required"),
-  description: z.string().min(1, "Description is required"),
+  title: z.string().trim().min(1, "Title is required"),
+  description: z.string().trim().min(1, "Description is required"),
   priority: z.nativeEnum(TicketPriority),
   type: z.nativeEnum(TicketType),
   assetId: z.string().optional().nullable(),
@@ -181,7 +181,11 @@ export default function TicketsList() {
 
   const onSubmit = async (values: z.infer<typeof createTicketSchema>) => {
     try {
-      await createMutation.mutateAsync({ data: values });
+      await createMutation.mutateAsync({ data: {
+        ...values,
+        title: values.title.trim(),
+        description: values.description.trim(),
+      }});
       setCreateSuccess(true);
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
       setTimeout(() => {
