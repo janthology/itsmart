@@ -9,7 +9,6 @@ export function Header() {
     if (location.startsWith('/assets')) return 'Assets';
     if (location.startsWith('/tickets')) return 'Tickets';
     if (location.startsWith('/admin/users')) return 'Users';
-    if (location.startsWith('/admin/categories')) return 'Categories';
     if (location === '/profile') return 'My Profile';
     if (location === '/reports') return 'Reports';
     if (location === '/calendar') return 'Calendar';

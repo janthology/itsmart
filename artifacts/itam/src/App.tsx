@@ -15,7 +15,6 @@ import AssetDetail from "./pages/assets/detail";
 import TicketsList from "./pages/tickets/index";
 import TicketDetail from "./pages/tickets/detail";
 import UsersManagement from "./pages/admin/users";
-import CategoriesManagement from "./pages/admin/categories";
 import Profile from "./pages/profile";
 import Reports from "./pages/reports";
 import ChangePassword from "./pages/change-password";
@@ -67,7 +66,6 @@ function Router() {
       <Route path="/tickets">{() => <ProtectedRoute component={TicketsList} />}</Route>
       <Route path="/tickets/:id">{() => <ProtectedRoute component={TicketDetail} />}</Route>
       <Route path="/admin/users">{() => <ProtectedRoute component={UsersManagement} />}</Route>
-      <Route path="/admin/categories">{() => <ProtectedRoute component={CategoriesManagement} />}</Route>
       <Route path="/reports">{() => <ProtectedRoute component={Reports} />}</Route>
       <Route path="/profile">{() => <ProtectedRoute component={Profile} />}</Route>
       <Route path="/change-password">{() => <ProtectedRoute component={ChangePassword} />}</Route>

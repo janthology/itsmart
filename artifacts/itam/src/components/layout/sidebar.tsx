@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useSidebar } from "@/lib/sidebar-context";
 import {
   LayoutDashboard, MonitorSmartphone, TicketCheck,
-  Users, Tags, LogOut, UserCircle, FileBarChart2, CalendarDays,
+  Users, LogOut, UserCircle, FileBarChart2, CalendarDays,
   PanelLeftOpen, PanelLeftClose,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -22,8 +22,7 @@ export function Sidebar() {
     { href: "/reports",          label: "Reports",    icon: FileBarChart2 },
     { href: "/calendar",         label: "Calendar",   icon: CalendarDays },
     ...(isAdmin ? [
-      { href: "/admin/users",      label: "Users",      icon: Users },
-      { href: "/admin/categories", label: "Categories", icon: Tags },
+      { href: "/admin/users", label: "Users", icon: Users },
     ] : []),
   ];
 

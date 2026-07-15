@@ -12,7 +12,6 @@ import type {
   Asset, AssetListResponse,
   Ticket, TicketWithComments, TicketListResponse,
   UserProfile,
-  Category,
   DashboardStats,
   CreateAssetRequest, UpdateAssetRequest,
   CreateTicketRequest, UpdateTicketRequest,
@@ -578,44 +577,6 @@ export function useUpdateMyProfile() {
   });
 }
 
-// ─── CATEGORIES ──────────────────────────────────────────────────────────────
-
-export function useGetCategories() {
-  const { data: authed } = useHasSession();
-  return useQuery<Category[]>({
-    queryKey: ['categories'],
-    enabled: !!authed,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('categories').select('*').order('created_at', { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map((c: any) => ({ id: c.id, name: c.name, type: c.type, createdAt: c.created_at }));
-    },
-  });
-}
-
-export function useCreateCategory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ data }: { data: { name: string; type: string } }) => {
-      const { error } = await supabase.from('categories').insert(data);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
-  });
-}
-
-export function useDeleteCategory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async ({ id }: { id: string }) => {
-      const { error } = await supabase.from('categories').delete().eq('id', id);
-      if (error) throw error;
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
-  });
-}
-
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
 
 export function useGetDashboardStats() {
@@ -701,7 +662,7 @@ export function useGetDashboardStats() {
 }
 
 // ─── Re-export types ──────────────────────────────────────────────────────────
-export type { UserProfile, Asset, Ticket, TicketWithComments, Category, DashboardStats };
+export type { UserProfile, Asset, Ticket, TicketWithComments, DashboardStats };
 
 // ─── ASSET HISTORY ────────────────────────────────────────────────────────────
 
