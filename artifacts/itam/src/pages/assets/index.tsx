@@ -95,7 +95,7 @@ export default function AssetsList() {
       // No scope param — admin defaults to "all", non-admin defaults to "mine"
       setScope(isAdmin ? "all" : "mine");
     }
-  }, [searchString]);
+  }, [searchString, isAdmin]);
 
   const queryFilters: any = {
     search: search || undefined,
@@ -114,21 +114,31 @@ export default function AssetsList() {
   const createMutation = useCreateAsset();
   const addHistory = useAddAssetHistory();
 
+  // Fleet composition uses scope only — not narrowed by status, category, or search
+  const summaryQueryFilters: { assignedTo?: string } = {};
+  if (assignedToFilter) {
+    summaryQueryFilters.assignedTo = assignedToFilter;
+  } else if (scope === "mine" && user?.id) {
+    summaryQueryFilters.assignedTo = user.id;
+  }
+  const { data: summaryData } = useGetAssets({ query: summaryQueryFilters });
+
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [search, statusFilter, categoryFilter, scope]);
+  useEffect(() => { setPage(1); }, [search, statusFilter, categoryFilter, scope, assignedToFilter]);
 
   const allAssets = data?.data ?? [];
   const pagedAssets = allAssets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
+  const baseForSummary = summaryData?.data ?? [];
   const summary = useMemo(
     () => ({
-      total: allAssets.length,
-      active: allAssets.filter((a: { status: string }) => a.status === "active").length,
-      inactive: allAssets.filter((a: { status: string }) => a.status === "inactive").length,
-      maintenance: allAssets.filter((a: { status: string }) => a.status === "maintenance").length,
-      retired: allAssets.filter((a: { status: string }) => a.status === "retired").length,
+      total: baseForSummary.length,
+      active: baseForSummary.filter((a) => String(a.status) === AssetStatus.active).length,
+      inactive: baseForSummary.filter((a) => String(a.status) === AssetStatus.inactive).length,
+      maintenance: baseForSummary.filter((a) => String(a.status) === AssetStatus.maintenance).length,
+      retired: baseForSummary.filter((a) => String(a.status) === AssetStatus.retired).length,
     }),
-    [allAssets]
+    [baseForSummary]
   );
   const onSubmit = async (values: z.infer<typeof createAssetSchema>) => {
     try {
@@ -306,13 +316,11 @@ export default function AssetsList() {
 
         {/* Split layout: fleet sidebar + inventory */}
         <div className="grid gap-5 lg:grid-cols-[minmax(240px,280px)_1fr] lg:items-start">
-          {!isLoading && (
-            <AssetSummaryStrip
-              {...summary}
-              statusFilter={statusFilter}
-              onStatusFilter={setStatusFilter}
-            />
-          )}
+          <AssetSummaryStrip
+            {...summary}
+            statusFilter={statusFilter}
+            onStatusFilter={setStatusFilter}
+          />
 
           <div className="min-w-0 space-y-4">
             <AssetToolbar

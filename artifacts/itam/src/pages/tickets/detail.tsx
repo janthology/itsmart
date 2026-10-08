@@ -100,7 +100,7 @@ export default function TicketDetail() {
       const bLoad = staffWorkload.find(w => w.id === b.id)?.totalActive ?? 0;
       return aLoad - bLoad; // lowest workload first
     });
-  }, [supportStaff, staffWorkload]);
+  }, [assignableStaff, staffWorkload]);
 
   const [commentText, setCommentText] = useState("");
   const [copied, setCopied] = useState(false);
@@ -158,9 +158,15 @@ export default function TicketDetail() {
       const assigneeName = assigneeId
         ? (assignableStaff.find(s => s.id === assigneeId)?.fullName ?? (user?.id === assigneeId ? user?.fullName : 'Unknown'))
         : null;
+      const statusNote =
+        assigneeId && ticket?.status === "open"
+          ? ' Status set to "in progress".'
+          : !assigneeId && ticket?.status === "in_progress"
+            ? ' Status reverted to "open".'
+            : "";
       const remark = assigneeId
-        ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}. Status set to "in progress".`
-        : `🔓 Ticket unassigned by ${user?.fullName ?? 'Unknown'}. Status reverted to "open".`;
+        ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}.${statusNote}`
+        : `🔓 Ticket unassigned by ${user?.fullName ?? 'Unknown'}.${statusNote}`;
       await commentMutation.mutateAsync({ id, data: { commentText: remark } });
       toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
     } catch (e) {
@@ -733,7 +739,7 @@ export default function TicketDetail() {
                         </div>
                       )}
 
-                      {isAdmin && (
+                      {canManage && (
                         <div>
                           <Label className="mb-1.5 flex items-center gap-1.5">
                             <UserCheck className="w-4 h-4 text-primary" /> Assign To
@@ -741,12 +747,14 @@ export default function TicketDetail() {
                           <Select
                             value={ticket.assignedTo?.id ?? "unassigned"}
                             onValueChange={(v) => handleAssign(v === "unassigned" ? null : v)}
-                            disabled={updateMutation.isPending || ticket.status === 'resolved'}
+                            disabled={updateMutation.isPending || ticket.status === "resolved"}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {rankedStaff.map((s, i) => {
+                              {rankedStaff
+                                .filter((s) => (s as { isActive?: boolean }).isActive !== false)
+                                .map((s, i) => {
                                 const load = staffWorkload.find(w => w.id === s.id)?.totalActive ?? 0;
                                 const isRecommended = i === 0 && load === Math.min(...rankedStaff.map(r => staffWorkload.find(w => w.id === r.id)?.totalActive ?? 0));
                                 return (
@@ -766,14 +774,18 @@ export default function TicketDetail() {
                               ★ Suggested based on current workload
                             </p>
                           )}
+                          {isSupport && ticket.status === "open" && ticket.assignedTo?.id !== user?.id && (
+                            <Button
+                              variant="outline"
+                              className="mt-2 w-full rounded-xl"
+                              disabled={updateMutation.isPending}
+                              onClick={() => handleAssign(user!.id)}
+                            >
+                              {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}
+                              Assign to Me
+                            </Button>
+                          )}
                         </div>
-                      )}
-
-                      {isSupport && ticket.status === 'open' && ticket.assignedTo?.id !== user?.id && (
-                        <Button variant="outline" className="w-full rounded-xl" disabled={updateMutation.isPending} onClick={() => handleAssign(user!.id)}>
-                          {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}
-                          Assign to Me
-                        </Button>
                       )}
 
                       {ticket.assignedTo && (

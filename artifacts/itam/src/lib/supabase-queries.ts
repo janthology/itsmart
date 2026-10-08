@@ -272,7 +272,7 @@ export function useUpdateAsset() {
       if (data.category !== undefined) updates.category = data.category;
       if (data.status !== undefined) updates.status = data.status;
       if (data.notes !== undefined) updates.notes = data.notes;
-      if (data.assignedToId !== undefined) updates.assigned_to = data.assignedToId;
+      if ('assignedToId' in data) updates.assigned_to = data.assignedToId ?? null;
       if (data.purchaseDate !== undefined) updates.purchase_date = data.purchaseDate;
       if ((data as any).purchaseValue !== undefined) updates.purchase_value = (data as any).purchaseValue;
       if ((data as any).serialNumber !== undefined) updates.serial_number = (data as any).serialNumber;
@@ -444,6 +444,7 @@ export function useUpdateTicket() {
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.invalidateQueries({ queryKey: ['ticket', id] });
       qc.invalidateQueries({ queryKey: ['dashboardStats'] });
+      qc.invalidateQueries({ queryKey: ['staffWorkload'] });
     },
   });
 }

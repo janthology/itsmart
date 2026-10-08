@@ -616,7 +616,7 @@ export default function AssetDetail() {
                           </SelectTrigger>
                           <SelectContent>
                             {(allUsers ?? [])
-                              .filter(u => u.id !== asset.assignedTo?.id)
+                              .filter((u) => (u as { isActive?: boolean }).isActive !== false && u.id !== asset.assignedTo?.id)
                               .map(u => (
                                 <SelectItem key={u.id} value={u.id}>{u.fullName}</SelectItem>
                               ))

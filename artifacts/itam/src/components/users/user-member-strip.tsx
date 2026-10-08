@@ -42,7 +42,7 @@ export function UserMemberStrip({ user, selected, isCurrentUser, onSelect }: Use
         <span
           className={cn(
             "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2",
-            selected ? "ring-primary" : "ring-white",
+            selected ? "ring-primary" : "ring-card dark:ring-background",
             active ? "bg-emerald-400" : "bg-slate-400"
           )}
         />
