@@ -371,6 +371,7 @@ export function ReportsPreview({ isActive }: { isActive: boolean }) {
               r="3"
               fill="rgb(167,243,208)"
               cx={TIP_X}
+              cy={TIP_Y}
               animate={{
                 opacity: [0, 0, 1, 1, 0],
                 scale: [0, 0, 1, 1.2, 0],

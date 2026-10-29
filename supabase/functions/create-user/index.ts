@@ -1,124 +1,209 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.49.1'
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '86400',
 }
 
 const VALID_ROLES = new Set(['general_user', 'support_staff', 'administrator'])
 
+function jsonResponse(status: number, body: Record<string, unknown>) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
+function serviceRoleKey() {
+  const legacyKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (legacyKey) return legacyKey
+
+  const encodedKeys = Deno.env.get('SUPABASE_SECRET_KEYS')
+  if (!encodedKeys) return ''
+
+  try {
+    const keys = JSON.parse(encodedKeys) as Record<string, string>
+    return keys.default ?? Object.values(keys)[0] ?? ''
+  } catch {
+    return ''
+  }
+}
+
+async function readError(response: Response, fallback: string) {
+  try {
+    const data = await response.json() as {
+      error?: string
+      message?: string
+      msg?: string
+    }
+    return data.error ?? data.message ?? data.msg ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+async function requireActiveAdministrator(
+  supabaseUrl: string,
+  serviceKey: string,
+  token: string,
+) {
+  const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${token}`,
+    },
+  })
+  if (!userResponse.ok) return null
+
+  const caller = await userResponse.json() as { id?: string }
+  if (!caller.id) return null
+
+  const profileUrl = new URL(`${supabaseUrl}/rest/v1/profiles`)
+  profileUrl.searchParams.set('select', 'role,is_active')
+  profileUrl.searchParams.set('id', `eq.${caller.id}`)
+
+  const profileResponse = await fetch(profileUrl, {
+    headers: {
+      apikey: serviceKey,
+      Authorization: `Bearer ${serviceKey}`,
+    },
+  })
+  if (!profileResponse.ok) return null
+
+  const profiles = await profileResponse.json() as Array<{
+    role?: string
+    is_active?: boolean
+  }>
+  const profile = profiles[0]
+  return profile?.role === 'administrator' && profile.is_active === true
+    ? caller
+    : null
+}
+
 Deno.serve(async (req: Request) => {
+  // Browser preflight requests carry no credentials, so answer them before
+  // doing any configuration, authentication, or dependency work.
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { status: 200, headers: corsHeaders })
+    return new Response(null, { status: 204, headers: corsHeaders })
   }
 
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return jsonResponse(405, { error: 'Method not allowed' })
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? ''
+    const serviceKey = serviceRoleKey()
+    if (!supabaseUrl || !serviceKey) {
+      return jsonResponse(500, { error: 'Supabase server configuration is missing' })
+    }
+
     const authHeader = req.headers.get('Authorization') ?? ''
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
-    if (!token) {
-      return new Response(JSON.stringify({ error: 'Missing bearer token' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    if (!token) return jsonResponse(401, { error: 'Missing bearer token' })
+
+    const caller = await requireActiveAdministrator(supabaseUrl, serviceKey, token)
+    if (!caller) {
+      return jsonResponse(403, {
+        error: 'Forbidden: active administrator role required',
       })
     }
 
-    const admin = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
-      { auth: { autoRefreshToken: false, persistSession: false } },
-    )
-
-    // Verify caller identity via GoTrue and enforce active administrator role
-    const { data: callerData, error: callerError } = await admin.auth.getUser(token)
-    if (callerError || !callerData?.user) {
-      return new Response(JSON.stringify({ error: 'Invalid or expired session' }), {
-        status: 401,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const { email, fullName, department, role } = await req.json() as {
+      email?: unknown
+      fullName?: unknown
+      department?: unknown
+      role?: unknown
     }
-
-    const { data: callerProfile, error: callerProfileError } = await admin
-      .from('profiles')
-      .select('role, is_active')
-      .eq('id', callerData.user.id)
-      .single()
-
-    if (
-      callerProfileError ||
-      !callerProfile ||
-      callerProfile.role !== 'administrator' ||
-      callerProfile.is_active !== true
-    ) {
-      return new Response(
-        JSON.stringify({ error: 'Forbidden: active administrator role required' }),
-        {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        },
-      )
-    }
-
-    const { email, fullName, department, role } = await req.json()
     if (!email || typeof email !== 'string' || !fullName || typeof fullName !== 'string') {
-      return new Response(JSON.stringify({ error: 'email and fullName are required' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return jsonResponse(400, { error: 'email and fullName are required' })
     }
 
-    const targetRole = role ?? 'general_user'
-    if (!VALID_ROLES.has(targetRole)) {
-      return new Response(JSON.stringify({ error: 'Invalid user role' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const targetRole = role === undefined || role === null ? 'general_user' : role
+    if (typeof targetRole !== 'string' || !VALID_ROLES.has(targetRole)) {
+      return jsonResponse(400, { error: 'Invalid user role' })
     }
 
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedName = fullName.trim()
     const normalizedDept =
-      typeof department === 'string' && department.trim().length > 0 ? department.trim() : null
+      typeof department === 'string' && department.trim().length > 0
+        ? department.trim()
+        : null
 
-    // Create auth user with default initial password; user must change on first login
-    const { data: authData, error: authError } = await admin.auth.admin.createUser({
-      email: normalizedEmail,
-      password: 'dostro2',
-      email_confirm: true,
-      user_metadata: { full_name: normalizedName, department: normalizedDept },
+    const createResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        email: normalizedEmail,
+        password: 'dostro2',
+        email_confirm: true,
+        user_metadata: {
+          full_name: normalizedName,
+          department: normalizedDept,
+        },
+      }),
     })
-    if (authError) throw authError
+    if (!createResponse.ok) {
+      return jsonResponse(400, {
+        error: await readError(createResponse, 'Failed to create user'),
+      })
+    }
 
-    // Upsert profile with role and mandatory password change flag
-    const { error: profileError } = await admin.from('profiles').upsert(
-      {
-        id: authData.user.id,
+    const createdUser = await createResponse.json() as { id?: string }
+    if (!createdUser.id) {
+      return jsonResponse(500, { error: 'Auth user was created without an ID' })
+    }
+
+    const profileUrl = new URL(`${supabaseUrl}/rest/v1/profiles`)
+    profileUrl.searchParams.set('on_conflict', 'id')
+
+    const profileResponse = await fetch(profileUrl, {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+        Prefer: 'resolution=merge-duplicates,return=representation',
+      },
+      body: JSON.stringify({
+        id: createdUser.id,
         full_name: normalizedName,
         department: normalizedDept,
         role: targetRole,
         is_active: true,
         must_change_password: true,
-      },
-      { onConflict: 'id' },
-    )
-    if (profileError) throw profileError
-
-    return new Response(JSON.stringify({ success: true, userId: authData.user.id }), {
-      status: 200,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }),
     })
+
+    if (!profileResponse.ok) {
+      const profileError = await readError(
+        profileResponse,
+        'Failed to create user profile',
+      )
+
+      // Avoid leaving an orphan auth account if its profile cannot be saved.
+      await fetch(
+        `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(createdUser.id)}`,
+        {
+          method: 'DELETE',
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+          },
+        },
+      ).catch(() => undefined)
+
+      return jsonResponse(500, { error: profileError })
+    }
+
+    return jsonResponse(200, { success: true, userId: createdUser.id })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
-    return new Response(JSON.stringify({ error: message }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return jsonResponse(500, { error: message })
   }
 })

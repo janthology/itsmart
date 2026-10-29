@@ -1,0 +1,10 @@
+project_id = "itsmart"
+
+# These browser-called functions authenticate the caller inside the handler.
+# Keeping gateway JWT verification off also lets unauthenticated CORS
+# preflight (OPTIONS) requests reach the handlers.
+[functions.create-user]
+verify_jwt = false
+
+[functions.reset-password]
+verify_jwt = false
