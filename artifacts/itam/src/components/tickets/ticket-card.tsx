@@ -32,6 +32,8 @@ export interface TicketCardData {
   ticketNumber?: string;
   type?: string;
   resolvedAt?: string | null;
+  lastActivityAt?: string | null;
+  updatedAt?: string;
   closedAt?: string | null;
   totalHoldSeconds?: number;
   onHoldAt?: string | null;

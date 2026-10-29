@@ -6,6 +6,7 @@ import { SLABadge } from "@/components/ui/sla-badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { TicketCardData } from "@/components/tickets/ticket-card";
+import { getResolvedTicketAutoCloseAt } from "@/lib/supabase-queries";
 
 function formatTicketDate(dateStr: string): string {
   const d = new Date(dateStr);
@@ -90,6 +91,7 @@ export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
   // directly (e.g. duplicate or created by mistake).
   const wasResolvedBeforeClose = ticket.status === "closed" && Boolean(ticket.resolvedAt);
   const wasClosedDirectly = ticket.status === "closed" && !ticket.resolvedAt;
+  const autoCloseAt = getResolvedTicketAutoCloseAt(ticket);
 
   const statusChip = (statusKey: "resolved" | "closed") => {
     const statusTheme = STATUS_THEME[statusKey];
@@ -179,6 +181,16 @@ export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
                       )}
                     >
                       {ticket.priority}
+                    </span>
+                  )}
+                  {autoCloseAt && (
+                    <span
+                      className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-emerald-700 ring-1 ring-emerald-500/25 bg-emerald-500/10 dark:text-emerald-300"
+                      title={`Auto-closes ${format(autoCloseAt, "MMM d, yyyy h:mm a")} if there is no activity. Comment or reopen (In Progress) if the issue recurs.`}
+                    >
+                      {autoCloseAt.getTime() <= Date.now()
+                        ? "Auto-close pending"
+                        : `Auto-closes ${format(autoCloseAt, "MMM d")}`}
                     </span>
                   )}
                 </div>

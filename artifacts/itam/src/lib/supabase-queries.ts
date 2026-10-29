@@ -106,7 +106,7 @@ function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: st
   };
 }
 
-function mapTicket(t: any): Ticket & { ticketNumber?: string; resolvedAt?: string | null; type?: string; satisfactionRating?: number | null; satisfactionComment?: string | null; totalHoldSeconds?: number; onHoldAt?: string | null } {
+function mapTicket(t: any): Ticket & { ticketNumber?: string; resolvedAt?: string | null; lastActivityAt?: string | null; type?: string; satisfactionRating?: number | null; satisfactionComment?: string | null; totalHoldSeconds?: number; onHoldAt?: string | null } {
   return {
     id: t.id,
     ticketNumber: t.ticket_number ?? null,
@@ -122,11 +122,34 @@ function mapTicket(t: any): Ticket & { ticketNumber?: string; resolvedAt?: strin
     updatedAt: t.updated_at,
     closedAt: t.closed_at ?? null,
     resolvedAt: t.resolved_at ?? null,
+    lastActivityAt: t.last_activity_at ?? t.updated_at ?? t.resolved_at ?? t.created_at ?? null,
     satisfactionRating: t.satisfaction_rating ?? null,
     satisfactionComment: t.satisfaction_comment ?? null,
     totalHoldSeconds: t.total_hold_seconds ?? 0,
     onHoldAt: t.on_hold_at ?? null,
   };
+}
+
+/** Resolved tickets auto-close after this many days without activity. */
+export const RESOLVED_TICKET_AUTO_CLOSE_DAYS = 7;
+
+/**
+ * When a resolved ticket will auto-close: 7 days after its last activity
+ * (ticket update or comment). Returns null for non-resolved tickets. The
+ * database job uses the same rule, based on last_activity_at.
+ */
+export function getResolvedTicketAutoCloseAt(ticket: {
+  status?: string;
+  resolvedAt?: string | null;
+  lastActivityAt?: string | null;
+  updatedAt?: string | null;
+}): Date | null {
+  if (ticket.status !== 'resolved') return null;
+  const base = ticket.lastActivityAt ?? ticket.updatedAt ?? ticket.resolvedAt;
+  if (!base) return null;
+  const baseDate = new Date(base);
+  if (Number.isNaN(baseDate.getTime())) return null;
+  return new Date(baseDate.getTime() + RESOLVED_TICKET_AUTO_CLOSE_DAYS * 24 * 60 * 60 * 1000);
 }
 
 // ─── Session gate ─────────────────────────────────────────────────────────────
@@ -373,7 +396,11 @@ export function useGetTicket(id: string) {
         id: c.id,
         ticketId: c.ticket_id,
         commentText: c.comment_text,
-        createdBy: mapUser(c.created_by_profile),
+        // System entries (e.g. auto-close remarks) have no human author.
+        isSystem: c.is_system ?? !c.created_by_profile,
+        createdBy: c.created_by_profile
+          ? mapUser(c.created_by_profile)
+          : { id: 'system', email: '', fullName: 'System', role: 'general_user' as const, createdAt: c.created_at, updatedAt: c.created_at, isActive: true, lastSignInAt: null },
         createdAt: c.created_at,
       }));
       return { ...ticket, comments };
@@ -477,7 +504,12 @@ export function useAddTicketComment() {
       });
       if (error) throw error;
     },
-    onSuccess: (_d, { id }) => qc.invalidateQueries({ queryKey: ['ticket', id] }),
+    // A comment is ticket activity: refresh the ticket (including its
+    // last-activity / auto-close timing) and the ticket list.
+    onSuccess: (_d, { id }) => {
+      qc.invalidateQueries({ queryKey: ['ticket', id] });
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+    },
   });
 }
 

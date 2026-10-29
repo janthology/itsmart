@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL } from "@/lib/supabase-queries";
+import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL, getResolvedTicketAutoCloseAt, RESOLVED_TICKET_AUTO_CLOSE_DAYS } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -347,6 +347,7 @@ export default function TicketDetail() {
   // Closure path is tracked by the retained resolved_at timestamp.
   const wasResolvedBeforeClose = ticket.status === "closed" && Boolean((ticket as any).resolvedAt);
   const wasClosedDirectly = ticket.status === "closed" && !(ticket as any).resolvedAt;
+  const autoCloseAt = getResolvedTicketAutoCloseAt(ticket as any);
 
   return (
     <AppLayout>
@@ -499,6 +500,17 @@ export default function TicketDetail() {
                       Resolved {format(new Date((ticket as any).resolvedAt), "MMM d, yyyy h:mm a")}
                     </span>
                   )}
+                  {autoCloseAt && (
+                    <span
+                      className="flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-300"
+                      title="Any activity — a comment or a status change — restarts this timer. Reopen the ticket (In Progress) if the issue recurs."
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                      {autoCloseAt.getTime() <= Date.now()
+                        ? "Auto-close pending — no activity for 7 days"
+                        : `Auto-closes ${format(autoCloseAt, "MMM d, yyyy")} if no activity`}
+                    </span>
+                  )}
                   {(ticket as any).closedAt && (
                     <span className="flex items-center gap-1.5">
                       Closed {format(new Date((ticket as any).closedAt), "MMM d, yyyy h:mm a")}
@@ -558,8 +570,8 @@ export default function TicketDetail() {
                       className="absolute left-[27px] top-6 bottom-6 w-px bg-border/70"
                     />
                     <div className="space-y-1">
-                      {ticket.comments.map((comment: { id: string; commentText: string; createdAt: string; createdBy: { fullName: string } }) => {
-                        const isSystemEntry = /^[🔄👤🔓⬆️⬇️✅📝]/.test(comment.commentText);
+                      {ticket.comments.map((comment: { id: string; commentText: string; createdAt: string; isSystem?: boolean; createdBy: { fullName: string } }) => {
+                        const isSystemEntry = comment.isSystem || /^[🔄👤🔓⬆️⬇️✅📝🤖]/.test(comment.commentText);
                         if (isSystemEntry) {
                           return (
                             <div key={comment.id} className="relative flex gap-3 py-3 pl-1">
@@ -714,6 +726,18 @@ export default function TicketDetail() {
                     </div>
                   ) : (
                     <>
+                      {ticket.status === 'resolved' && autoCloseAt && (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 px-3.5 py-3 text-xs leading-relaxed text-emerald-900 dark:border-emerald-800/50 dark:bg-emerald-900/10 dark:text-emerald-200">
+                          <p className="font-semibold">Auto-close scheduled</p>
+                          <p className="mt-0.5">
+                            {autoCloseAt.getTime() <= Date.now()
+                              ? `This ticket has had no activity for ${RESOLVED_TICKET_AUTO_CLOSE_DAYS} days and will be closed automatically by the hourly check.`
+                              : `This ticket will close automatically on ${format(autoCloseAt, "MMM d, yyyy h:mm a")} if there is no activity for ${RESOLVED_TICKET_AUTO_CLOSE_DAYS} days.`}{" "}
+                            Add a comment to restart the timer, or change the status back to In Progress if the issue recurs.
+                            When it auto-closes, a system remark with the reason for closing is recorded in the activity log below.
+                          </p>
+                        </div>
+                      )}
                       <div>
                         <Label className="mb-1.5 block">Update Status</Label>
                         <Select
