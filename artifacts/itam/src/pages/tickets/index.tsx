@@ -174,7 +174,10 @@ export default function TicketsList() {
 
   const queryFilters: any = {
     search: search || undefined,
-    status: statusFilter !== "all" ? statusFilter as any : undefined,
+    // "Resolved" is a lifecycle filter (it also includes tickets that were
+    // resolved before being closed), so it is applied client-side below
+    // instead of as an exact status match on the server query.
+    status: statusFilter !== "all" && statusFilter !== "resolved" ? statusFilter as any : undefined,
     priority: priorityFilter !== "all" ? priorityFilter as any : undefined,
   };
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
@@ -206,6 +209,14 @@ export default function TicketsList() {
 
   const allTickets = useMemo(() => {
     let base = data?.data ?? [];
+    if (statusFilter === "resolved" && !resolvedClosed) {
+      // Resolved includes tickets currently in Resolved and tickets that were
+      // resolved before they were closed (their resolved_at is retained).
+      base = base.filter(
+        (t: { status: string; resolvedAt?: string | null }) =>
+          t.status === "resolved" || (t.status === "closed" && Boolean(t.resolvedAt))
+      );
+    }
     // Multi-status filter: resolved + closed together (from dashboard "Resolved & Closed" card)
     if (resolvedClosed) {
       base = base.filter((t: { status: string }) => t.status === 'resolved' || t.status === 'closed');
@@ -214,7 +225,7 @@ export default function TicketsList() {
       base = base.filter((t) => !t.assignedTo);
     }
     return base;
-  }, [data, isAdmin, assigneeFilter, resolvedClosed]);
+  }, [data, isAdmin, assigneeFilter, resolvedClosed, statusFilter]);
   const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const showAdminTicketGroups =
@@ -248,8 +259,16 @@ export default function TicketsList() {
       open: baseForSummary.filter((t: { status: string }) => t.status === "open").length,
       inProgress: baseForSummary.filter((t: { status: string }) => t.status === "in_progress").length,
       onHold: baseForSummary.filter((t: { status: string }) => t.status === "on_hold").length,
-      resolvedClosed: baseForSummary.filter(
-        (t: { status: string }) => t.status === "resolved" || t.status === "closed"
+      // A ticket closed after being resolved counts under both Resolved and
+      // Closed; a ticket closed directly (no resolved_at) counts only as Closed.
+      resolved: baseForSummary.filter(
+        (t: { status: string; resolvedAt?: string | null }) =>
+          t.status === "resolved" || (t.status === "closed" && Boolean(t.resolvedAt))
+      ).length,
+      closed: baseForSummary.filter((t: { status: string }) => t.status === "closed").length,
+      resolvedBeforeClosed: baseForSummary.filter(
+        (t: { status: string; resolvedAt?: string | null }) =>
+          t.status === "closed" && Boolean(t.resolvedAt)
       ).length,
     }),
     [baseForSummary]

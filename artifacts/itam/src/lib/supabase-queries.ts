@@ -417,6 +417,12 @@ export function useUpdateTicket() {
       if (data.title !== undefined) updates.title = data.title;
       if (data.description !== undefined) updates.description = data.description;
       if ('assignedToId' in data) updates.assigned_to = data.assignedToId ?? null;
+      if (data.status === 'closed') {
+        // Closing a ticket must never clear its assignee — the assignment is
+        // part of the ticket's handling record. Ignore any assignee change
+        // bundled with a close transition.
+        delete updates.assigned_to;
+      }
 
       // SLA hold tracking
       if (data.status === 'on_hold') {
@@ -439,6 +445,9 @@ export function useUpdateTicket() {
       }
       if (data.status === 'closed') {
         updates.closed_at = new Date().toISOString();
+        // resolved_at is intentionally retained: it records that the ticket
+        // was resolved before closing. A closed ticket without resolved_at
+        // was closed directly (duplicate, created by mistake, etc.).
       }
       if (data.status === 'open' || data.status === 'in_progress' || data.status === 'on_hold') {
         if (data.status !== 'on_hold') updates.resolved_at = null;

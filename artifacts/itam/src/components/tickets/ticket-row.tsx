@@ -58,14 +58,20 @@ const STATUS_THEME: Record<
 const PRIORITY_THEME: Record<string, { ring: string; badge: string }> = {
   critical: {
     ring: "ring-rose-500/40",
-    badge: "bg-rose-500/10 text-rose-700 ring-rose-500/25",
+    badge: "bg-rose-500/10 text-rose-700 ring-rose-500/25 dark:text-rose-300",
   },
   high: {
     ring: "ring-amber-500/40",
-    badge: "bg-amber-500/10 text-amber-800 ring-amber-500/25",
+    badge: "bg-amber-500/10 text-amber-800 ring-amber-500/25 dark:text-amber-300",
   },
-  medium: { ring: "ring-sky-500/25", badge: "" },
-  low: { ring: "ring-transparent", badge: "" },
+  medium: {
+    ring: "ring-sky-500/25",
+    badge: "bg-sky-500/10 text-sky-800 ring-sky-500/25 dark:text-sky-300",
+  },
+  low: {
+    ring: "ring-slate-400/25",
+    badge: "bg-slate-500/10 text-slate-600 ring-slate-400/25 dark:text-slate-300",
+  },
 };
 
 interface TicketRowProps {
@@ -79,6 +85,27 @@ export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
   const theme = STATUS_THEME[ticket.status] ?? STATUS_THEME.open;
   const priority = PRIORITY_THEME[ticket.priority] ?? PRIORITY_THEME.low;
   const isUrgent = ticket.priority === "critical" || ticket.priority === "high";
+  // Closure path: closing a ticket retains resolved_at, so a closed ticket
+  // with a resolved timestamp was resolved first; one without it was closed
+  // directly (e.g. duplicate or created by mistake).
+  const wasResolvedBeforeClose = ticket.status === "closed" && Boolean(ticket.resolvedAt);
+  const wasClosedDirectly = ticket.status === "closed" && !ticket.resolvedAt;
+
+  const statusChip = (statusKey: "resolved" | "closed") => {
+    const statusTheme = STATUS_THEME[statusKey];
+    return (
+      <span
+        key={statusKey}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
+          statusTheme.chip
+        )}
+      >
+        <span className={cn("h-1.5 w-1.5 rounded-full", statusTheme.accent)} />
+        {statusTheme.label}
+      </span>
+    );
+  };
 
   return (
     <motion.div
@@ -118,16 +145,33 @@ export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
                   <span className="rounded-lg bg-primary/[0.06] px-2 py-0.5 font-mono text-[10px] font-bold tracking-wide text-primary ring-1 ring-primary/10">
                     {ticketNum}
                   </span>
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
-                      theme.chip
-                    )}
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full", theme.accent)} />
-                    {theme.label}
-                  </span>
-                  {isUrgent && priority.badge && (
+                  {wasResolvedBeforeClose ? (
+                    <>
+                      {statusChip("resolved")}
+                      {statusChip("closed")}
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1",
+                          theme.chip
+                        )}
+                      >
+                        <span className={cn("h-1.5 w-1.5 rounded-full", theme.accent)} />
+                        {theme.label}
+                      </span>
+                      {wasClosedDirectly && (
+                        <span
+                          className="inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground ring-1 ring-border/60"
+                          title="Closed without a resolved stage (for example, a duplicate or a ticket created by mistake)"
+                        >
+                          Closed directly
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {priority.badge && (
                     <span
                       className={cn(
                         "rounded-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider ring-1",

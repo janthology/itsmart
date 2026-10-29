@@ -136,6 +136,14 @@ export default function TicketDetail() {
       let remark = newStatus === 'open' && ticket?.assignedTo
         ? `🔄 Status changed to "${STATUS_LABEL[newStatus]}" by ${user?.fullName ?? 'Unknown'}. Ticket unassigned.`
         : `🔄 Status changed to "${STATUS_LABEL[newStatus] ?? newStatus}" by ${user?.fullName ?? 'Unknown'}.`;
+      if (newStatus === 'closed') {
+        // Record the closure path: resolved_at is retained when a resolved
+        // ticket is closed, so its presence means the ticket was resolved
+        // first; otherwise it was closed directly. The assignee is kept.
+        remark += (ticket as any)?.resolvedAt
+          ? `\n🏁 Closure path: Resolved before closing. Assignee retained.`
+          : `\n🏁 Closure path: Closed directly (no resolved stage). Assignee retained.`;
+      }
       if (remarks?.trim()) remark += `\n\n📝 Remarks: ${remarks.trim()}`;
 
       await commentMutation.mutateAsync({ id, data: { commentText: remark } });
@@ -336,6 +344,9 @@ export default function TicketDetail() {
     ticket.status === "open" && (ticket.priority === "high" || ticket.priority === "critical")
       ? "open_urgent"
       : ticket.status;
+  // Closure path is tracked by the retained resolved_at timestamp.
+  const wasResolvedBeforeClose = ticket.status === "closed" && Boolean((ticket as any).resolvedAt);
+  const wasClosedDirectly = ticket.status === "closed" && !(ticket as any).resolvedAt;
 
   return (
     <AppLayout>
@@ -453,7 +464,24 @@ export default function TicketDetail() {
                   </button>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-3">
-                  <StatusBadge status={statusForBadge} />
+                  {wasResolvedBeforeClose ? (
+                    <>
+                      <StatusBadge status="resolved" />
+                      <StatusBadge status="closed" />
+                    </>
+                  ) : (
+                    <>
+                      <StatusBadge status={statusForBadge} />
+                      {wasClosedDirectly && (
+                        <span
+                          className="inline-flex items-center rounded-full border border-border bg-muted/60 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground"
+                          title="Closed without a resolved stage (for example, a duplicate or a ticket created by mistake)"
+                        >
+                          Closed directly
+                        </span>
+                      )}
+                    </>
+                  )}
                   <StatusBadge status={ticket.priority} />
                   {(ticket as any).type && (ticket as any).type !== "other" && (
                     <span className="text-xs text-muted-foreground bg-muted/80 px-2.5 py-1 rounded-md border border-border/50 font-medium">
@@ -661,7 +689,13 @@ export default function TicketDetail() {
                   {ticket.status === 'closed' ? (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/50 bg-muted/30 text-sm text-muted-foreground">
-                        <StatusBadge status="closed" /> This ticket is closed — no further actions allowed.
+                        <StatusBadge status="closed" />
+                        <span>
+                          This ticket is closed — no further actions allowed.{" "}
+                          {wasResolvedBeforeClose
+                            ? "It was resolved before closing, and its assignee has been retained."
+                            : "It was closed directly without a resolved stage, and its assignee has been retained."}
+                        </span>
                       </div>
                       {(ticket as any).satisfactionRating != null && (
                         <div className="px-3 py-3 rounded-xl border border-amber-200 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-900/10 space-y-1.5">
