@@ -26,6 +26,7 @@ import {
 } from "@/components/tickets/ticket-summary-strip";
 import { TicketInventoryList } from "@/components/tickets/ticket-inventory-list";
 import { TicketToolbar } from "@/components/tickets/ticket-toolbar";
+import type { TicketCardData } from "@/components/tickets/ticket-card";
 
 const PAGE_SIZE = 25;
 
@@ -45,6 +46,57 @@ const createTicketSchema = z.object({
   type: z.nativeEnum(TicketType),
   assetId: z.string().optional().nullable(),
 });
+
+interface TicketGroupSectionProps {
+  title: string;
+  subtitle: string;
+  emptyMessage: string;
+  tickets: TicketCardData[];
+  typeLabels: Record<string, string>;
+}
+
+function TicketGroupSection({
+  title,
+  subtitle,
+  emptyMessage,
+  tickets,
+  typeLabels,
+}: TicketGroupSectionProps) {
+  const [groupPage, setGroupPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(tickets.length / PAGE_SIZE));
+  const safePage = Math.min(groupPage, totalPages);
+  const pagedGroupTickets = tickets.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE
+  );
+
+  useEffect(() => {
+    setGroupPage(1);
+  }, [title, tickets.length]);
+
+  return (
+    <section aria-label={title} className="space-y-4">
+      <TicketInventoryList
+        tickets={pagedGroupTickets}
+        total={tickets.length}
+        typeLabels={typeLabels}
+        title={title}
+        subtitle={subtitle}
+        emptyMessage={emptyMessage}
+      />
+      {tickets.length > PAGE_SIZE && (
+        <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/70 shadow-sm">
+          <PaginationBar
+            page={safePage}
+            pageSize={PAGE_SIZE}
+            total={tickets.length}
+            onPage={setGroupPage}
+          />
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function TicketsList() {
   const { user } = useAuth();
@@ -127,8 +179,10 @@ export default function TicketsList() {
   };
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
   if (scope === "mine") {
-    // Only apply personal filter when no explicit assignee filter is active
-    if (isAdmin && assigneeFilter === "all") queryFilters.assignedTo = user?.id;
+    // Only apply personal filter when no explicit assignee filter is active.
+    // Administrators get the union of tickets assigned to them and tickets
+    // they submitted; the render layer separates that union into groups.
+    if (isAdmin && assigneeFilter === "all") queryFilters.relatedTo = user?.id;
     else if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
     else if (isSupport) queryFilters.assignedTo = user?.id;
   }
@@ -141,7 +195,7 @@ export default function TicketsList() {
     summaryQueryFilters.assignedTo = assigneeFilter;
   }
   if (scope === "mine") {
-    if (isAdmin && assigneeFilter === "all") summaryQueryFilters.assignedTo = user?.id ?? "";
+    if (isAdmin && assigneeFilter === "all") summaryQueryFilters.relatedTo = user?.id ?? "";
     else if (!isAdmin && !isSupport) summaryQueryFilters.createdBy = user?.id ?? "";
     else if (isSupport) summaryQueryFilters.assignedTo = user?.id ?? "";
   }
@@ -162,6 +216,23 @@ export default function TicketsList() {
     return base;
   }, [data, isAdmin, assigneeFilter, resolvedClosed]);
   const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const showAdminTicketGroups =
+    isAdmin && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
+  const assignedToMeTickets = useMemo(
+    () =>
+      showAdminTicketGroups
+        ? allTickets.filter((ticket) => ticket.assignedTo?.id === user?.id)
+        : [],
+    [allTickets, showAdminTicketGroups, user?.id]
+  );
+  const submittedByMeTickets = useMemo(
+    () =>
+      showAdminTicketGroups
+        ? allTickets.filter((ticket) => ticket.createdBy.id === user?.id)
+        : [],
+    [allTickets, showAdminTicketGroups, user?.id]
+  );
 
   const baseForSummary = useMemo(() => {
     let base = summaryData?.data ?? [];
@@ -220,9 +291,11 @@ export default function TicketsList() {
 
   const scopeLabel =
     scope === "mine"
-      ? isSupport
-        ? "Tickets assigned to you"
-        : "Tickets you submitted"
+      ? isAdmin
+        ? "Tickets assigned to you or submitted by you"
+        : isSupport
+          ? "Tickets assigned to you"
+          : "Tickets you submitted"
       : "Organization-wide support queue";
 
   const typeLabels = Object.fromEntries(
@@ -475,6 +548,23 @@ export default function TicketsList() {
                     <X className="h-4 w-4" /> Clear all filters
                   </Button>
                 )}
+              </div>
+            ) : showAdminTicketGroups ? (
+              <div className="space-y-5">
+                <TicketGroupSection
+                  title="Assigned to me"
+                  subtitle="Support tickets assigned to you"
+                  emptyMessage="No tickets are currently assigned to you."
+                  tickets={assignedToMeTickets as TicketCardData[]}
+                  typeLabels={typeLabels}
+                />
+                <TicketGroupSection
+                  title="Submitted by me"
+                  subtitle="Support tickets you submitted"
+                  emptyMessage="You have not submitted any support tickets."
+                  tickets={submittedByMeTickets as TicketCardData[]}
+                  typeLabels={typeLabels}
+                />
               </div>
             ) : (
               <>

@@ -6,9 +6,19 @@ interface TicketInventoryListProps {
   tickets: TicketCardData[];
   total: number;
   typeLabels?: Record<string, string>;
+  title?: string;
+  subtitle?: string;
+  emptyMessage?: string;
 }
 
-export function TicketInventoryList({ tickets, total, typeLabels = {} }: TicketInventoryListProps) {
+export function TicketInventoryList({
+  tickets,
+  total,
+  typeLabels = {},
+  title = "Support queue",
+  subtitle = "Track, triage, and resolve requests",
+  emptyMessage,
+}: TicketInventoryListProps) {
   return (
     <div className="app-surface overflow-hidden rounded-3xl">
       <div className="app-panel-header flex items-center justify-between gap-3 border-b border-primary/[0.06] px-5 py-4">
@@ -17,8 +27,8 @@ export function TicketInventoryList({ tickets, total, typeLabels = {} }: TicketI
             <TicketCheck className="h-5 w-5" strokeWidth={2} />
           </div>
           <div className="min-w-0">
-            <h2 className="font-display text-base font-semibold text-foreground">Support queue</h2>
-            <p className="text-xs text-muted-foreground">Track, triage, and resolve requests</p>
+            <h2 className="font-display text-base font-semibold text-foreground">{title}</h2>
+            <p className="text-xs text-muted-foreground">{subtitle}</p>
           </div>
         </div>
         <div className="shrink-0 rounded-full bg-primary/[0.08] px-3.5 py-1.5 ring-1 ring-primary/15">
@@ -30,6 +40,9 @@ export function TicketInventoryList({ tickets, total, typeLabels = {} }: TicketI
       </div>
 
       <div className="space-y-2 p-2.5 sm:p-3">
+        {tickets.length === 0 && emptyMessage ? (
+          <p className="px-3 py-8 text-center text-sm text-muted-foreground">{emptyMessage}</p>
+        ) : null}
         {tickets.map((ticket, i) => (
           <TicketRow
             key={ticket.id}

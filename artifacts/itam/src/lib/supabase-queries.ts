@@ -310,16 +310,17 @@ const TICKET_SELECT = `
   asset:assets(*, assigned_to_profile:profiles!assets_assigned_to_fkey(*))
 `;
 
-export function useGetTickets(opts?: { query?: { search?: string; status?: TicketStatus; priority?: TicketPriority; createdBy?: string; assignedTo?: string } }) {
+export function useGetTickets(opts?: { query?: { search?: string; status?: TicketStatus; priority?: TicketPriority; createdBy?: string; assignedTo?: string; relatedTo?: string } }) {
   const search = opts?.query?.search;
   const status = opts?.query?.status;
   const priority = opts?.query?.priority;
   const createdBy = opts?.query?.createdBy;
   const assignedTo = opts?.query?.assignedTo;
+  const relatedTo = opts?.query?.relatedTo;
   const { data: authed } = useHasSession();
 
   return useQuery<TicketListResponse>({
-    queryKey: ['tickets', search, status, priority, createdBy, assignedTo],
+    queryKey: ['tickets', search, status, priority, createdBy, assignedTo, relatedTo],
     enabled: !!authed,
     queryFn: async () => {
       let q = supabase.from('tickets').select(TICKET_SELECT).order('created_at', { ascending: false });
@@ -327,8 +328,13 @@ export function useGetTickets(opts?: { query?: { search?: string; status?: Ticke
       // profile columns via .or() is unreliable in PostgREST with embedded selects)
       if (status) q = q.eq('status', status);
       if (priority) q = q.eq('priority', priority);
-      if (createdBy) q = q.eq('created_by', createdBy);
-      if (assignedTo) q = q.eq('assigned_to', assignedTo);
+      if (relatedTo) {
+        // Personal queue: tickets assigned to the user OR submitted by them.
+        q = q.or(`assigned_to.eq.${relatedTo},created_by.eq.${relatedTo}`);
+      } else {
+        if (createdBy) q = q.eq('created_by', createdBy);
+        if (assignedTo) q = q.eq('assigned_to', assignedTo);
+      }
       const { data, error } = await q;
       if (error) throw error;
       let tickets = (data ?? []).map(mapTicket);
