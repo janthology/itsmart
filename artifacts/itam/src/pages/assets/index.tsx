@@ -224,17 +224,17 @@ export default function AssetsList() {
                       <Plus className="w-4 h-4 mr-1.5" /> New asset
                     </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[600px] p-0 overflow-hidden border-0 shadow-2xl rounded-2xl">
-                    <div className="px-6 py-6 bg-muted/30 border-b border-border">
+                  <DialogContent className="sm:max-w-[780px] p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl flex max-h-[94vh] flex-col">
+                    <div className="shrink-0 px-6 py-4 bg-muted/30 border-b border-border">
                       <DialogHeader>
                         <DialogTitle className="text-2xl font-display">Add new asset</DialogTitle>
                         <DialogDescription>Enter the details for the new inventory item.</DialogDescription>
                       </DialogHeader>
                     </div>
-                    <div className="p-6 max-h-[70vh] overflow-y-auto">
-                      <Form {...form}>
-                        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
+                    <Form {...form}>
+                      <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+                        <div className="flex-1 overflow-y-auto px-6 py-4">
+                          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                             <FormField control={form.control} name="assetTag" render={({ field }) => (
                               <FormItem>
                                 <FormLabel>Asset Tag</FormLabel>
@@ -290,24 +290,24 @@ export default function AssetsList() {
                             )} />
                           </div>
                           <FormField control={form.control} name="notes" render={({ field }) => (
-                            <FormItem><FormLabel>Notes</FormLabel><FormControl><Textarea placeholder="Additional notes..." {...field} value={field.value ?? ''} className="rounded-xl min-h-[80px]" /></FormControl><FormMessage /></FormItem>
+                            <FormItem className="mt-3"><FormLabel>Notes</FormLabel><FormControl><Textarea placeholder="Additional notes..." {...field} value={field.value ?? ''} rows={2} className="rounded-xl min-h-[56px]" /></FormControl><FormMessage /></FormItem>
                           )} />
-                          <div className="pt-4 flex justify-end gap-3 border-t border-border/50">
-                            <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl">Cancel</Button>
-                            {createSuccess ? (
-                              <Button disabled className="rounded-xl bg-emerald-600 text-white gap-2">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                                Asset saved
-                              </Button>
-                            ) : (
-                              <Button type="submit" disabled={createMutation.isPending} className="rounded-xl">
-                                {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save asset
-                              </Button>
-                            )}
-                          </div>
-                        </form>
-                      </Form>
-                    </div>
+                        </div>
+                        <div className="flex shrink-0 justify-end gap-3 border-t border-border/50 px-6 py-4">
+                          <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl">Cancel</Button>
+                          {createSuccess ? (
+                            <Button disabled className="rounded-xl bg-emerald-600 text-white gap-2">
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                              Asset saved
+                            </Button>
+                          ) : (
+                            <Button type="submit" disabled={createMutation.isPending} className="rounded-xl">
+                              {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Save asset
+                            </Button>
+                          )}
+                        </div>
+                      </form>
+                    </Form>
                   </DialogContent>
                 </Dialog>
               )}
