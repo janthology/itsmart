@@ -65,6 +65,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           table: 'profiles',
           filter: `id=eq.${userId}`,
         }, (payload) => {
+          // An admin password reset flags the account mid-session too:
+          // forcing the change on next login alone would let the current
+          // session keep working indefinitely. The App gate redirects to
+          // /change-password as soon as this flag flips on.
+          if (payload.new?.must_change_password === true) {
+            setMustChangePassword(true);
+          }
           if (payload.new?.is_active === false) {
             supabase.auth.signOut().then(() => {
               toast({

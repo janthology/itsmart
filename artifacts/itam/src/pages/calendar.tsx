@@ -194,16 +194,33 @@ export default function CalendarPage() {
     count: monthEvents.filter((e) => e.type === type).length,
   }));
 
+  // A deadline is overdue when it has already passed: SLA deadlines carry a
+  // precise time, while PM dates are day-granular (due today is not overdue).
+  const isOverdueDeadline = (e: CalendarEvent) => {
+    const now = new Date();
+    if (e.type === "ticket_due") return e.date.getTime() < now.getTime();
+    if (e.type === "pm_due") return startOfDay(e.date).getTime() < startOfDay(now).getTime();
+    return false;
+  };
+
   const upcoming = useMemo(() => {
-    const today = startOfDay(new Date());
+    const now = new Date();
+    const startToday = startOfDay(now);
+    const horizon = addDays(now, 7); // next 7 x 24h, not midnight 7 days out
     return filteredEvents
-      .filter((e) => e.date >= today && e.date <= addDays(today, 7))
-      .sort((a, b) => {
-        if (a.type === "ticket_due" && b.type !== "ticket_due") return -1;
-        if (b.type === "ticket_due" && a.type !== "ticket_due") return 1;
-        return a.date.getTime() - b.date.getTime();
-      })
+      .filter(
+        (e) =>
+          // Overdue deadlines are the most urgent items — never hide them
+          // just because their date has passed.
+          isOverdueDeadline(e) || (e.date >= startToday && e.date <= horizon)
+      )
+      .sort((a, b) =>
+        // Overdue first (oldest first), then chronological.
+        Number(isOverdueDeadline(b)) - Number(isOverdueDeadline(a)) ||
+        a.date.getTime() - b.date.getTime()
+      )
       .slice(0, 8);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredEvents]);
 
   const goToToday = () => {
@@ -447,6 +464,9 @@ export default function CalendarPage() {
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-foreground truncate">{evt.title}</p>
                           <p className="text-[10px] text-muted-foreground">
+                            {isOverdueDeadline(evt) && (
+                              <span className="font-semibold text-destructive">Overdue · </span>
+                            )}
                             {format(evt.date, "EEE, MMM d")}
                             {evt.type === "ticket_due" && ` · ${format(evt.date, "h:mm a")}`}
                           </p>

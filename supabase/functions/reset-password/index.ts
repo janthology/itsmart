@@ -159,6 +159,29 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(404, { error: 'User profile not found' })
     }
 
+    // Revoke the target's existing sessions so the old password's sessions
+    // cannot keep working after the reset. Skipped when an admin resets
+    // their own password (it would sign them out mid-task). Best-effort:
+    // a failure here must not fail the reset itself — the account is still
+    // flagged must_change_password, which the app enforces at login and,
+    // via the profiles realtime subscription, mid-session.
+    if (userId !== caller.id) {
+      try {
+        await fetch(
+          `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}/sessions`,
+          {
+            method: 'DELETE',
+            headers: {
+              apikey: serviceKey,
+              Authorization: `Bearer ${serviceKey}`,
+            },
+          },
+        )
+      } catch {
+        // Non-fatal — see comment above.
+      }
+    }
+
     return jsonResponse(200, { success: true })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'

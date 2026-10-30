@@ -129,7 +129,9 @@ export default function UsersManagement() {
         const err = await res.json().catch(() => ({ error: res.statusText }));
         throw new Error(err.error || "Failed to reset password");
       }
-      await supabase.from("profiles").update({ must_change_password: true }).eq("id", id);
+      // The reset-password Edge Function also flags must_change_password
+      // server-side with the service key, so no client-side profile write
+      // is needed (or wanted) here.
       toast({
         title: "Password reset",
         description: 'Password reset to "dostro2". User will be prompted to change it on next login.',
