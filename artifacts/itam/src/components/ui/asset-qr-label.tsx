@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QrCode, Printer } from "lucide-react";
@@ -23,11 +22,20 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
   const qrValue = `ASSET:${assetTag}`;
 
   useEffect(() => {
-    QRCode.toDataURL(qrValue, {
-      width: 160,
-      margin: 1,
-      color: { dark: "#355872", light: "#ffffff" },
-    }).then(setQrDataUrl);
+    // The qrcode library is only needed here, so it loads on demand
+    // instead of shipping with the main bundle.
+    let cancelled = false;
+    import("qrcode")
+      .then(({ default: QRCode }) =>
+        QRCode.toDataURL(qrValue, {
+          width: 160,
+          margin: 1,
+          color: { dark: "#355872", light: "#ffffff" },
+        })
+      )
+      .then((url) => { if (!cancelled) setQrDataUrl(url); })
+      .catch(() => { /* QR preview is non-critical; label printing still works */ });
+    return () => { cancelled = true; };
   }, [qrValue]);
 
   const handlePrint = () => {

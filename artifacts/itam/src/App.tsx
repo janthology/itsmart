@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, Redirect, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -8,20 +9,22 @@ import { ThemeProvider } from "@/components/layout/theme-provider";
 import { Loader2 } from "lucide-react";
 import { ErrorBoundary } from "@/components/error-boundary";
 
-// Pages
+// Pages. Login stays eagerly loaded (it is the first screen for signed-out
+// visitors); every other page is code-split with React.lazy so the browser
+// only downloads the page being visited instead of the whole app upfront.
 import Login from "./pages/login";
 
-import Dashboard from "./pages/dashboard";
-import AssetsList from "./pages/assets/index";
-import AssetDetail from "./pages/assets/detail";
-import TicketsList from "./pages/tickets/index";
-import TicketDetail from "./pages/tickets/detail";
-import UsersManagement from "./pages/admin/users";
-import Profile from "./pages/profile";
-import Reports from "./pages/reports";
-import ChangePassword from "./pages/change-password";
-import CalendarPage from "./pages/calendar";
-import NotFound from "./pages/not-found";
+const Dashboard = lazy(() => import("./pages/dashboard"));
+const AssetsList = lazy(() => import("./pages/assets/index"));
+const AssetDetail = lazy(() => import("./pages/assets/detail"));
+const TicketsList = lazy(() => import("./pages/tickets/index"));
+const TicketDetail = lazy(() => import("./pages/tickets/detail"));
+const UsersManagement = lazy(() => import("./pages/admin/users"));
+const Profile = lazy(() => import("./pages/profile"));
+const Reports = lazy(() => import("./pages/reports"));
+const ChangePassword = lazy(() => import("./pages/change-password"));
+const CalendarPage = lazy(() => import("./pages/calendar"));
+const NotFound = lazy(() => import("./pages/not-found"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -56,8 +59,17 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   return <Component />;
 }
 
+function PageLoading() {
+  return (
+    <div className="flex h-screen items-center justify-center">
+      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+    </div>
+  );
+}
+
 function Router() {
   return (
+    <Suspense fallback={<PageLoading />}>
     <Switch>
       <Route path="/login" component={Login} />
       {/* Public signup is disabled — accounts are created by administrators.
@@ -81,6 +93,7 @@ function Router() {
 
       <Route component={NotFound} />
     </Switch>
+    </Suspense>
   );
 }
 

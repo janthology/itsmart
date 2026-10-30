@@ -74,8 +74,8 @@ export default function Reports() {
   const [activeId, setActiveId] = useState<ReportId>(visibleReports[0]?.id ?? "ticket_list");
   const active = REPORT_DEFS.find(r => r.id === activeId)!;
 
-  const handleExport = (fn: () => void) => {
-    try { fn(); toast({ title: "Export successful", description: "Your file has been downloaded." }); }
+  const handleExport = async (fn: () => Promise<void>) => {
+    try { await fn(); toast({ title: "Export successful", description: "Your file has been downloaded." }); }
     catch { toast({ variant: "destructive", title: "Export failed", description: "Could not generate the file." }); }
   };
 

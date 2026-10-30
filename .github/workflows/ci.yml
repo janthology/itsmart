@@ -36,3 +36,6 @@ jobs:
 
       - name: Production build
         run: pnpm --filter @workspace/itam run build
+
+      - name: Bundle budget
+        run: pnpm --filter @workspace/itam run check:bundle

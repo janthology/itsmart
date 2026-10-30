@@ -1,11 +1,24 @@
-import * as XLSX from "xlsx";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 import { format, parseISO } from "date-fns";
+
+// xlsx and jsPDF are heavy (~1 MB combined) and only needed when a user
+// actually exports a report, so they are loaded on demand instead of
+// being part of the app bundle everyone downloads at startup.
+async function loadXlsx() {
+  return import("xlsx");
+}
+
+async function loadPdf() {
+  const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+    import("jspdf"),
+    import("jspdf-autotable"),
+  ]);
+  return { jsPDF, autoTable };
+}
 
 // ─── Assets ──────────────────────────────────────────────────────────────────
 
-export function exportAssetsXlsx(assets: any[]) {
+export async function exportAssetsXlsx(assets: any[]) {
+  const XLSX = await loadXlsx();
   const rows = assets.map((a) => ({
     "Asset Tag": a.assetTag,
     "Name": a.name,
@@ -28,7 +41,8 @@ export function exportAssetsXlsx(assets: any[]) {
   XLSX.writeFile(wb, `assets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportAssetsPdf(assets: any[], filters: { status?: string; from?: string; to?: string } = {}) {
+export async function exportAssetsPdf(assets: any[], filters: { status?: string; from?: string; to?: string } = {}) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
 
   doc.setFontSize(16);
@@ -69,7 +83,8 @@ export function exportAssetsPdf(assets: any[], filters: { status?: string; from?
 
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
-export function exportTicketsXlsx(tickets: any[]) {
+export async function exportTicketsXlsx(tickets: any[]) {
+  const XLSX = await loadXlsx();
   const rows = tickets.map((t) => ({
     "Ticket No.": (t as any).ticketNumber ?? t.id.substring(0, 8),
     "Title": t.title,
@@ -90,7 +105,8 @@ export function exportTicketsXlsx(tickets: any[]) {
   XLSX.writeFile(wb, `tickets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportTicketsPdf(tickets: any[], filters: { status?: string; priority?: string; from?: string; to?: string } = {}) {
+export async function exportTicketsPdf(tickets: any[], filters: { status?: string; priority?: string; from?: string; to?: string } = {}) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
 
   doc.setFontSize(16);
@@ -132,7 +148,8 @@ export function exportTicketsPdf(tickets: any[], filters: { status?: string; pri
 
 // ─── Asset Assignment / History Report ───────────────────────────────────────
 
-export function exportAssetHistoryXlsx(history: any[]) {
+export async function exportAssetHistoryXlsx(history: any[]) {
+  const XLSX = await loadXlsx();
   const rows = history.map((h) => ({
     "Asset Tag": h.assetTag ?? "",
     "Asset Name": h.assetName ?? "",
@@ -149,7 +166,8 @@ export function exportAssetHistoryXlsx(history: any[]) {
   XLSX.writeFile(wb, `asset-history-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportAssetHistoryPdf(history: any[], filters: { from?: string; to?: string } = {}) {
+export async function exportAssetHistoryPdf(history: any[], filters: { from?: string; to?: string } = {}) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(16);
   doc.text("Asset Assignment & History Report", 14, 16);
@@ -183,7 +201,8 @@ export function exportAssetHistoryPdf(history: any[], filters: { from?: string; 
 
 const SLA_HOURS: Record<string, number> = { critical: 4, high: 8, medium: 24, low: 72 };
 
-export function exportTicketPerformanceXlsx(tickets: any[]) {
+export async function exportTicketPerformanceXlsx(tickets: any[]) {
+  const XLSX = await loadXlsx();
   const rows = tickets.map((t) => {
     const target = SLA_HOURS[t.priority] ?? 24;
     const resMs = t.resolvedAt ? new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime() : null;
@@ -209,7 +228,8 @@ export function exportTicketPerformanceXlsx(tickets: any[]) {
   XLSX.writeFile(wb, `ticket-performance-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportTicketPerformancePdf(tickets: any[], filters: { from?: string; to?: string } = {}) {
+export async function exportTicketPerformancePdf(tickets: any[], filters: { from?: string; to?: string } = {}) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(16);
   doc.text("Ticket Resolution Performance Report", 14, 16);
@@ -258,7 +278,8 @@ export function exportTicketPerformancePdf(tickets: any[], filters: { from?: str
 
 // ─── User Activity Report ─────────────────────────────────────────────────────
 
-export function exportUserActivityXlsx(users: any[]) {
+export async function exportUserActivityXlsx(users: any[]) {
+  const XLSX = await loadXlsx();
   const rows = users.map((u) => ({
     "Full Name": u.fullName,
     "Email": u.email ?? "",
@@ -276,7 +297,8 @@ export function exportUserActivityXlsx(users: any[]) {
   XLSX.writeFile(wb, `user-activity-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportUserActivityPdf(users: any[]) {
+export async function exportUserActivityPdf(users: any[]) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(16);
   doc.text("User Activity Report", 14, 16);
@@ -305,7 +327,8 @@ export function exportUserActivityPdf(users: any[]) {
 
 // ─── Unassigned Assets Report ─────────────────────────────────────────────────
 
-export function exportUnassignedAssetsXlsx(assets: any[]) {
+export async function exportUnassignedAssetsXlsx(assets: any[]) {
+  const XLSX = await loadXlsx();
   const rows = assets.map((a) => ({
     "Asset Tag": a.assetTag,
     "Name": a.name,
@@ -324,7 +347,8 @@ export function exportUnassignedAssetsXlsx(assets: any[]) {
   XLSX.writeFile(wb, `unassigned-assets-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportUnassignedAssetsPdf(assets: any[]) {
+export async function exportUnassignedAssetsPdf(assets: any[]) {
+  const { jsPDF, autoTable } = await loadPdf();
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(16);
   doc.text("Unassigned Assets Report", 14, 16);
@@ -361,7 +385,8 @@ function computeDepreciation(purchaseValue: number, purchaseDate: string) {
   return { ageYears: +ageYears.toFixed(2), annualDep: +annualDep.toFixed(2), accumulated: +accumulated.toFixed(2), currentValue: +currentValue.toFixed(2), pctDepreciated };
 }
 
-export function exportDepreciationXlsx(assets: any[]) {
+export async function exportDepreciationXlsx(assets: any[]) {
+  const XLSX = await loadXlsx();
   const rows = assets
     .filter((a) => a.purchaseValue != null && a.purchaseDate)
     .map((a) => {
@@ -387,7 +412,8 @@ export function exportDepreciationXlsx(assets: any[]) {
   XLSX.writeFile(wb, `asset-depreciation-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportDepreciationPdf(assets: any[]) {
+export async function exportDepreciationPdf(assets: any[]) {
+  const { jsPDF, autoTable } = await loadPdf();
   const eligible = assets.filter((a) => a.purchaseValue != null && a.purchaseDate);
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(16);
@@ -420,7 +446,8 @@ export function exportDepreciationPdf(assets: any[]) {
 
 // ─── Ticket Satisfaction Summary ──────────────────────────────────────────────
 
-export function exportSatisfactionXlsx(tickets: any[]) {
+export async function exportSatisfactionXlsx(tickets: any[]) {
+  const XLSX = await loadXlsx();
   const rated = tickets.filter((t) => t.satisfactionRating != null);
   const rows = rated.map((t) => ({
     "Ticket No.": t.ticketNumber ?? t.id.substring(0, 8),
@@ -438,7 +465,8 @@ export function exportSatisfactionXlsx(tickets: any[]) {
   XLSX.writeFile(wb, `satisfaction-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
-export function exportSatisfactionPdf(tickets: any[]) {
+export async function exportSatisfactionPdf(tickets: any[]) {
+  const { jsPDF, autoTable } = await loadPdf();
   const rated = tickets.filter((t) => t.satisfactionRating != null);
   const avg = rated.length ? (rated.reduce((s, t) => s + t.satisfactionRating, 0) / rated.length).toFixed(1) : "N/A";
   const dist = [1, 2, 3, 4, 5].map((s) => rated.filter((t) => t.satisfactionRating === s).length);
