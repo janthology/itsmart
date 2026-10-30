@@ -89,7 +89,7 @@ export default function Dashboard() {
   }
 
   const statsRecord = stats as unknown as Record<string, number>;
-  const metrics = buildDashboardMetrics(statsRecord, user.role, user.id);
+  const metrics = buildDashboardMetrics(statsRecord, user.role);
 
   const ticketsTitle = isGeneral ? "My recent tickets" : "Recent tickets";
   const hasTrendData = !ticketTrend.every((p) => p.opened === 0 && p.resolved === 0);
@@ -152,10 +152,17 @@ export default function Dashboard() {
                             {ticket.title}
                           </p>
                           <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                            {ticket.createdBy.fullName} · {format(new Date(ticket.createdAt), "MMM d, yyyy")}
+                            {ticket.createdBy.fullName} · Updated {format(new Date((ticket as any).lastActivityAt ?? ticket.updatedAt ?? ticket.createdAt), "MMM d, yyyy")}
                           </p>
                         </div>
-                        <StatusBadge status={ticket.status} />
+                        {ticket.status === "closed" && (ticket as any).resolvedAt ? (
+                          <span className="flex shrink-0 items-center gap-1.5">
+                            <StatusBadge status="resolved" />
+                            <StatusBadge status="closed" />
+                          </span>
+                        ) : (
+                          <StatusBadge status={ticket.status} />
+                        )}
                         <ChevronRight className="h-4 w-4 text-muted-foreground/25 group-hover:text-primary shrink-0 hidden sm:block transition-colors" />
                       </div>
                     </Link>
@@ -178,8 +185,7 @@ export default function Dashboard() {
           )}
         </div>
 
-        {hasTrendData && (
-          <motion.div variants={motionItem}>
+        <motion.div variants={motionItem}>
             <DashboardPanel
               title="Ticket trends"
               description="Opened vs resolved over time"
@@ -198,26 +204,35 @@ export default function Dashboard() {
                 </Select>
               }
             >
-              <div className="px-5 pb-5 pt-1">
-                <ChartContainer config={ticketTrendConfig} className="h-[252px] w-full aspect-auto">
-                  <BarChart
-                    data={ticketTrend}
-                    margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
-                    barCategoryGap="26%"
-                  >
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
-                    <XAxis dataKey="week" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickMargin={10} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={32} />
-                    <ChartTooltip content={<ChartTooltipContent />} cursor={{ opacity: 0.25 }} />
-                    <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "14px" }} />
-                    <Bar dataKey="opened" fill="var(--color-opened)" radius={[5, 5, 0, 0]} maxBarSize={38} />
-                    <Bar dataKey="resolved" fill="var(--color-resolved)" radius={[5, 5, 0, 0]} maxBarSize={38} />
-                  </BarChart>
-                </ChartContainer>
-              </div>
+              {hasTrendData ? (
+                <div className="px-5 pb-5 pt-1">
+                  <ChartContainer config={ticketTrendConfig} className="h-[252px] w-full aspect-auto">
+                    <BarChart
+                      data={ticketTrend}
+                      margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
+                      barCategoryGap="26%"
+                    >
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} className="stroke-border/40" />
+                      <XAxis dataKey="week" tick={{ fontSize: 11 }} axisLine={false} tickLine={false} tickMargin={10} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} axisLine={false} tickLine={false} width={32} />
+                      <ChartTooltip content={<ChartTooltipContent />} cursor={{ opacity: 0.25 }} />
+                      <Legend wrapperStyle={{ fontSize: "11px", paddingTop: "14px" }} />
+                      <Bar dataKey="opened" fill="var(--color-opened)" radius={[5, 5, 0, 0]} maxBarSize={38} />
+                      <Bar dataKey="resolved" fill="var(--color-resolved)" radius={[5, 5, 0, 0]} maxBarSize={38} />
+                    </BarChart>
+                  </ChartContainer>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center px-6 py-14 text-center">
+                  <TrendingUp className="h-6 w-6 text-primary/30" />
+                  <p className="mt-3 text-sm font-display font-semibold text-foreground">No trend data in this period</p>
+                  <p className="mt-1 max-w-xs text-xs leading-relaxed text-muted-foreground">
+                    No tickets were opened or resolved in the selected range. Try a longer period above.
+                  </p>
+                </div>
+              )}
             </DashboardPanel>
           </motion.div>
-        )}
 
         {showAdminGrid && (
           <div className="grid gap-5 lg:grid-cols-2">
@@ -225,7 +240,7 @@ export default function Dashboard() {
               <motion.div variants={motionItem}>
                 <DashboardPanel
                   title="Team workload"
-                  description="Active tickets per support staff"
+                  description="Active tickets per assignee (support staff and administrators)"
                   icon={<Users className="h-4 w-4" />}
                   action={{ label: "Tickets", href: "/tickets" }}
                 >

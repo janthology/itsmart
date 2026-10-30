@@ -638,9 +638,11 @@ export function useGetDashboardStats() {
       const userId = user?.id;
 
       // Ticket queries scoped by role
-      let ticketsQ = supabase.from('tickets').select('status');
+      let ticketsQ = supabase.from('tickets').select('status, resolved_at');
       let recentQ = supabase.from('tickets').select(TICKET_SELECT)
-        .order('created_at', { ascending: false }).limit(5);
+        .order('last_activity_at', { ascending: false, nullsFirst: false })
+        .order('created_at', { ascending: false })
+        .limit(5);
 
       if (role === 'support_staff' && userId) {
         ticketsQ = ticketsQ.eq('assigned_to', userId);
@@ -654,14 +656,6 @@ export function useGetDashboardStats() {
       if (ticketsRes.error) throw ticketsRes.error;
       if (recentTicketsRes.error) throw recentTicketsRes.error;
 
-      // For admin: also fetch count of tickets assigned to them personally
-      let myTickets = 0;
-      if (role === 'administrator' && userId) {
-        const { count } = await supabase
-          .from('tickets').select('id', { count: 'exact', head: true })
-          .eq('assigned_to', userId);
-        myTickets = count ?? 0;
-      }
       // Asset counts — admin and support staff get org-wide; support/general also get personal assigned count
       let assets: any[] = [];
       let userCount = 0;
@@ -696,10 +690,18 @@ export function useGetDashboardStats() {
         retiredAssets: assets.filter((a: any) => a.status === 'retired').length,
         openTickets: tickets.filter((t: any) => t.status === 'open').length,
         inProgressTickets: tickets.filter((t: any) => t.status === 'in_progress').length,
-        resolvedTickets: tickets.filter((t: any) => t.status === 'resolved' || t.status === 'closed').length,
+        // Lifecycle counts: a ticket closed after being resolved counts as
+        // Resolved as well as Closed; resolvedClosedTickets stays the
+        // de-duplicated union used by the combined card.
+        resolvedTickets: tickets.filter(
+          (t: any) => t.status === 'resolved' || (t.status === 'closed' && !!t.resolved_at)
+        ).length,
+        closedTickets: tickets.filter((t: any) => t.status === 'closed').length,
+        resolvedClosedTickets: tickets.filter(
+          (t: any) => t.status === 'resolved' || t.status === 'closed'
+        ).length,
         totalTickets: tickets.length,
         allTickets: tickets.length,  // alias used by admin "All Tickets" card
-        myTickets,
         myAssignedAssets,
         totalUsers: userCount,
         recentTickets: (recentTicketsRes.data ?? []).map(mapTicket),
@@ -790,23 +792,31 @@ export function useGetStaffWorkload() {
     enabled: !!authed,
     queryFn: async () => {
       const [staffRes, ticketsRes] = await Promise.all([
-        supabase.from('profiles').select('id, full_name').eq('role', 'support_staff').order('full_name'),
+        // Assignable staff = active support staff AND administrators (both
+        // can be ticket assignees); deactivated accounts are excluded.
+        supabase.from('profiles').select('id, full_name')
+          .in('role', ['support_staff', 'administrator'])
+          .eq('is_active', true)
+          .order('full_name'),
         supabase.from('tickets').select('assigned_to, status').in('status', ['open', 'in_progress', 'on_hold']),
       ]);
       if (staffRes.error) throw staffRes.error;
       if (ticketsRes.error) throw ticketsRes.error;
       const tickets = ticketsRes.data ?? [];
-      return (staffRes.data ?? []).map((s: any) => {
-        const mine = tickets.filter((t: any) => t.assigned_to === s.id);
-        return {
-          id: s.id,
-          fullName: s.full_name,
-          openCount: mine.filter((t: any) => t.status === 'open').length,
-          inProgressCount: mine.filter((t: any) => t.status === 'in_progress').length,
-          onHoldCount: mine.filter((t: any) => t.status === 'on_hold').length,
-          totalActive: mine.length,
-        };
-      });
+      return (staffRes.data ?? [])
+        .map((s: any) => {
+          const mine = tickets.filter((t: any) => t.assigned_to === s.id);
+          return {
+            id: s.id,
+            fullName: s.full_name,
+            openCount: mine.filter((t: any) => t.status === 'open').length,
+            inProgressCount: mine.filter((t: any) => t.status === 'in_progress').length,
+            onHoldCount: mine.filter((t: any) => t.status === 'on_hold').length,
+            totalActive: mine.length,
+          };
+        })
+        // Busiest first so the panel reads as a workload ranking.
+        .sort((a, b) => b.totalActive - a.totalActive || a.fullName.localeCompare(b.fullName));
     },
   });
 }
@@ -844,27 +854,34 @@ export function useGetTicketTrend(weeks = 8) {
     queryKey: ['ticketTrend', weeks],
     enabled: !!authed,
     queryFn: async () => {
-      const since = new Date();
-      since.setDate(since.getDate() - weeks * 7);
+      // Build week buckets (Mon–Sun) first, ending with the current week, and
+      // query exactly from the first bucket's start so no fetched event can
+      // fall outside every bucket.
+      const startOfWeek = (date: Date) => {
+        const d = new Date(date);
+        const day = d.getDay();
+        d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+        d.setHours(0, 0, 0, 0);
+        return d;
+      };
+      const currentWeekStart = startOfWeek(new Date());
+      const buckets: { label: string; start: Date; end: Date }[] = [];
+      for (let i = weeks - 1; i >= 0; i--) {
+        const start = new Date(currentWeekStart);
+        start.setDate(start.getDate() - i * 7);
+        const end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        buckets.push({ label: `${start.toLocaleString('default', { month: 'short' })} ${start.getDate()}`, start, end });
+      }
 
+      const since = buckets[0].start;
       const [openedRes, resolvedRes] = await Promise.all([
         supabase.from('tickets').select('created_at').gte('created_at', since.toISOString()),
         supabase.from('tickets').select('resolved_at').not('resolved_at', 'is', null).gte('resolved_at', since.toISOString()),
       ]);
       if (openedRes.error) throw openedRes.error;
       if (resolvedRes.error) throw resolvedRes.error;
-
-      // Build week buckets (Mon–Sun)
-      const buckets: { label: string; start: Date; end: Date }[] = [];
-      for (let i = weeks - 1; i >= 0; i--) {
-        const start = new Date();
-        start.setDate(start.getDate() - i * 7 - (start.getDay() === 0 ? 6 : start.getDay() - 1));
-        start.setHours(0, 0, 0, 0);
-        const end = new Date(start);
-        end.setDate(end.getDate() + 6);
-        end.setHours(23, 59, 59, 999);
-        buckets.push({ label: `${start.toLocaleString('default', { month: 'short' })} ${start.getDate()}`, start, end });
-      }
 
       return buckets.map(({ label, start, end }) => ({
         week: label,
@@ -995,19 +1012,32 @@ export function useGetAssetAnomalies() {
       const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
       const oneYearAgo = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
 
-      const [assetsRes, historyRes] = await Promise.all([
+      const [assetsRes, historyRes, statusHistoryRes] = await Promise.all([
         supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at, last_pm_date, next_pm_date'),
         supabase.from('asset_history')
           .select('asset_id, action, created_at')
           .in('action', ['assigned', 'unassigned'])
           .gte('created_at', thirtyDaysAgo),
+        // When each asset entered its current status (for duration-based
+        // rules); updated_at alone also moves on unrelated edits.
+        supabase.from('asset_history')
+          .select('asset_id, new_value, created_at')
+          .eq('action', 'status_changed')
+          .order('created_at', { ascending: false }),
       ]);
 
       if (assetsRes.error) throw assetsRes.error;
       if (historyRes.error) throw historyRes.error;
+      if (statusHistoryRes.error) throw statusHistoryRes.error;
 
       const assets = assetsRes.data ?? [];
       const history = historyRes.data ?? [];
+      const statusHistory = statusHistoryRes.data ?? [];
+      const statusSince = (asset: any) => {
+        const latestChange = statusHistory.find((h: any) => h.asset_id === asset.id);
+        if (latestChange && latestChange.new_value === asset.status) return latestChange.created_at;
+        return asset.updated_at;
+      };
       const anomalies: AssetAnomaly[] = [];
 
       for (const asset of assets) {
@@ -1021,10 +1051,11 @@ export function useGetAssetAnomalies() {
           });
         }
 
-        // 2. Long maintenance: in maintenance for 30+ days
+        // 2. Long maintenance: in maintenance for 30+ days (since entering
+        // the status, not since any unrelated edit)
         if (asset.status === 'maintenance') {
-          const updatedAt = new Date(asset.updated_at).getTime();
-          const daysSince = Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000));
+          const sinceMs = new Date(statusSince(asset)).getTime();
+          const daysSince = Math.floor((now - sinceMs) / (24 * 60 * 60 * 1000));
           if (daysSince >= 30) {
             anomalies.push({
               assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
@@ -1036,9 +1067,9 @@ export function useGetAssetAnomalies() {
 
         // 3. Inactive long: inactive/unassigned for 1+ year
         if (asset.status === 'inactive') {
-          const updatedAt = new Date(asset.updated_at).getTime();
-          if (updatedAt < new Date(oneYearAgo).getTime()) {
-            const months = Math.floor((now - updatedAt) / (30 * 24 * 60 * 60 * 1000));
+          const sinceMs = new Date(statusSince(asset)).getTime();
+          if (sinceMs < new Date(oneYearAgo).getTime()) {
+            const months = Math.floor((now - sinceMs) / (30 * 24 * 60 * 60 * 1000));
             anomalies.push({
               assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
               type: 'inactive_long', severity: 'warning',
@@ -1047,17 +1078,19 @@ export function useGetAssetAnomalies() {
           }
         }
 
-        // 4. End of life: purchase_date + useful_life <= today
+        // 4. End of life: exact purchase date + useful life has passed
         if (asset.purchase_date && asset.status !== 'retired') {
           const usefulLife = USEFUL_LIFE[asset.category] ?? 5;
-          const purchaseYear = new Date(asset.purchase_date).getFullYear();
-          const eolYear = purchaseYear + usefulLife;
-          const currentYear = new Date().getFullYear();
-          if (currentYear >= eolYear) {
+          const purchaseDate = new Date(asset.purchase_date);
+          const eolDate = new Date(purchaseDate);
+          eolDate.setFullYear(eolDate.getFullYear() + usefulLife);
+          if (now >= eolDate.getTime()) {
+            const criticalDate = new Date(eolDate);
+            criticalDate.setFullYear(criticalDate.getFullYear() + 1);
             anomalies.push({
               assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name,
-              type: 'end_of_life', severity: currentYear > eolYear ? 'critical' : 'warning',
-              message: `Reached end of life (${usefulLife}-year lifespan, purchased ${purchaseYear})`,
+              type: 'end_of_life', severity: now >= criticalDate.getTime() ? 'critical' : 'warning',
+              message: `Reached end of life (${usefulLife}-year lifespan, purchased ${purchaseDate.getFullYear()})`,
             });
           }
         }
@@ -1082,7 +1115,11 @@ export function useGetAssetAnomalies() {
         }
       }
 
-      return anomalies;
+      // Critical alerts first so the dashboard's top entries are the most
+      // urgent ones, regardless of asset order.
+      return anomalies.sort((a, b) =>
+        (a.severity === b.severity ? 0 : a.severity === 'critical' ? -1 : 1)
+      );
     },
   });
 }

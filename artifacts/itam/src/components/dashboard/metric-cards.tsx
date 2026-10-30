@@ -7,7 +7,6 @@ import {
   Clock,
   Monitor,
   TicketIcon,
-  UserCheck,
   ArrowUpRight,
   type LucideIcon,
 } from "lucide-react";
@@ -133,8 +132,7 @@ export function MetricGrid({ metrics }: MetricGridProps) {
 
 export function buildDashboardMetrics(
   stats: Record<string, number>,
-  role: string,
-  userId?: string
+  role: string
 ): MetricConfig[] {
   if (role === "administrator") {
     return [
@@ -188,17 +186,17 @@ export function buildDashboardMetrics(
         accent: "info",
       },
       {
-        title: "Resolved & closed",
+        title: "Resolved",
         value: stats.resolvedTickets ?? 0,
         icon: CheckCircle2,
-        href: "/tickets?status=resolved_closed&scope=all",
+        href: "/tickets?status=resolved&scope=all",
         accent: "success",
       },
       {
-        title: "Tickets assigned to me",
-        value: stats.myTickets ?? 0,
-        icon: UserCheck,
-        href: `/tickets?assignedTo=${userId}`,
+        title: "Closed",
+        value: stats.closedTickets ?? 0,
+        icon: Archive,
+        href: "/tickets?status=closed&scope=all",
         accent: "violet",
       },
     ];
@@ -229,7 +227,7 @@ export function buildDashboardMetrics(
       },
       {
         title: "Resolved & closed",
-        value: stats.resolvedTickets ?? 0,
+        value: stats.resolvedClosedTickets ?? stats.resolvedTickets ?? 0,
         icon: CheckCircle2,
         href: "/tickets?status=resolved_closed&scope=mine",
         accent: "success",
@@ -254,7 +252,7 @@ export function buildDashboardMetrics(
     },
     {
       title: "Resolved & closed",
-      value: stats.resolvedTickets ?? 0,
+      value: stats.resolvedClosedTickets ?? stats.resolvedTickets ?? 0,
       icon: CheckCircle2,
       href: "/tickets?status=resolved_closed&scope=mine",
       accent: "success",

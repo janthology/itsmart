@@ -31,7 +31,7 @@ const SEGMENTS = [
     dot: "bg-amber-500",
     bar: "bg-amber-500",
     pill: "border-primary/10 bg-primary/[0.03] hover:border-primary/20 hover:bg-primary/[0.06]",
-    href: "/assets?scope=all",
+    href: "/assets?status=maintenance&scope=all",
   },
   {
     label: "Retired",
