@@ -694,9 +694,9 @@ export default function TicketDetail() {
                   <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 font-bold text-sm ring-1 ring-primary/10">
                     {ticket.assignedTo ? ticket.assignedTo.fullName.charAt(0) : "—"}
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     {ticket.assignedTo ? (
-                      <p className="text-sm font-semibold text-foreground">{ticket.assignedTo.fullName}</p>
+                      <p className="truncate text-sm font-semibold text-foreground" title={ticket.assignedTo.fullName}>{ticket.assignedTo.fullName}</p>
                     ) : (
                       <p className="text-sm text-muted-foreground italic">Awaiting assignment</p>
                     )}
@@ -831,10 +831,10 @@ export default function TicketDetail() {
                                 const isRecommended = suggestedStaff?.id === s.id;
                                 return (
                                   <SelectItem key={s.id} value={s.id}>
-                                    <span className="flex items-center gap-2">
-                                      {s.fullName}
-                                      <span className="text-xs text-muted-foreground">({load} active)</span>
-                                      {isRecommended && <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">★ Suggested</span>}
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <span className="min-w-0 truncate">{s.fullName}</span>
+                                      <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">({load} active)</span>
+                                      {isRecommended && <span className="shrink-0 whitespace-nowrap text-xs font-medium text-emerald-600 dark:text-emerald-400">★ Suggested</span>}
                                     </span>
                                   </SelectItem>
                                 );
@@ -842,10 +842,13 @@ export default function TicketDetail() {
                             </SelectContent>
                           </Select>
                           {suggestedStaff && !ticket.assignedTo && (
-                            <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
-                              ★ Suggested:{" "}
-                              <span className="font-medium text-foreground">{suggestedStaff.fullName}</span>
-                              ({suggestedLoad} active) — based on current workload
+                            <p
+                              className="mt-1.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
+                              title={`Suggested based on current workload: ${suggestedStaff.fullName} (${suggestedLoad} active)`}
+                            >
+                              <span className="shrink-0 font-medium text-emerald-600 dark:text-emerald-400">★ Suggested:</span>
+                              <span className="min-w-0 truncate font-medium text-foreground">{suggestedStaff.fullName}</span>
+                              <span className="shrink-0 whitespace-nowrap">· {suggestedLoad} active</span>
                             </p>
                           )}
                           {isSupport && ticket.status === "open" && ticket.assignedTo?.id !== user?.id && (
@@ -863,11 +866,13 @@ export default function TicketDetail() {
                       )}
 
                       {ticket.assignedTo && (
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground pt-1 border-t border-border/50">
-                          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                        <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground pt-1 border-t border-border/50">
+                          <div className="w-6 h-6 shrink-0 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
                             {ticket.assignedTo.fullName.charAt(0)}
                           </div>
-                          <span>Assigned to <span className="font-medium text-foreground">{ticket.assignedTo.fullName}</span></span>
+                          <span className="min-w-0 truncate" title={`Assigned to ${ticket.assignedTo.fullName}`}>
+                            Assigned to <span className="font-medium text-foreground">{ticket.assignedTo.fullName}</span>
+                          </span>
                         </div>
                       )}
                     </>
