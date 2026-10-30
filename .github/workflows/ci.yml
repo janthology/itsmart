@@ -28,9 +28,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build workspace libraries (types)
-        run: pnpm exec tsc -b lib/api-client-react
-
       - name: Typecheck app
         run: pnpm --filter @workspace/itam run typecheck
 

@@ -3,19 +3,12 @@
   "version": "0.0.0",
   "license": "MIT",
   "scripts": {
-    "build": "pnpm run typecheck && pnpm -r --if-present run build",
-    "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "build": "pnpm -r --if-present run build",
+    "typecheck": "pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
   },
   "private": true,
   "devDependencies": {
-    "@esbuild/win32-x64": "0.27.3",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2"
-  },
-  "dependencies": {
-    "@rollup/rollup-win32-x64-msvc": "^4.59.0",
-    "@tailwindcss/oxide-win32-x64-msvc": "^4.2.2",
-    "lightningcss-win32-x64-msvc": "^1.32.0"
   }
 }

@@ -17,7 +17,7 @@ import type {
   CreateTicketRequest, UpdateTicketRequest,
   CreateCommentRequest,
   UpdateUserRequest, UpdateProfileRequest,
-} from '@workspace/api-client-react';
+} from './api-types';
 
 // ─── Enums (defined locally so they're always value exports) ─────────────────
 
