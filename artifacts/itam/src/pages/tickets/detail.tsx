@@ -87,20 +87,37 @@ export default function TicketDetail() {
   const commentMutation = useAddTicketComment();
   const { data: supportStaff } = useGetSupportStaff();
   const { data: allUsers } = useGetUsers();
-  // Assignable staff = support staff + administrators, for both the dropdown and workload ranking
-  const assignableStaff = (allUsers ?? []).filter(u => u.role === 'support_staff' || u.role === 'administrator');
-  const { data: staffWorkload = [] } = useGetStaffWorkload();
+  // Assignable staff = active support staff + administrators, for both the
+  // dropdown and workload ranking. Inactive accounts must be excluded BEFORE
+  // ranking: useGetUsers returns them too, and a deactivated account with 0
+  // active tickets would otherwise win the "least busy" comparison while
+  // being filtered out of the dropdown, leaving nobody marked as suggested.
+  const assignableStaff = (allUsers ?? []).filter(
+    u =>
+      (u.role === 'support_staff' || u.role === 'administrator') &&
+      (u as { isActive?: boolean }).isActive !== false
+  );
+  const { data: staffWorkload = [], isLoading: isWorkloadLoading } = useGetStaffWorkload();
   const satisfactionMutation = useSubmitSatisfactionRating();
 
-  // Smart routing: rank assignable staff by workload (fewer active = better)
+  // Smart routing: rank assignable staff by workload (fewest active first,
+  // name as a deterministic tie-break)
   const rankedStaff = useMemo(() => {
     if (!assignableStaff.length) return [];
     return [...assignableStaff].sort((a, b) => {
       const aLoad = staffWorkload.find(w => w.id === a.id)?.totalActive ?? 0;
       const bLoad = staffWorkload.find(w => w.id === b.id)?.totalActive ?? 0;
-      return aLoad - bLoad; // lowest workload first
+      return aLoad - bLoad || a.fullName.localeCompare(b.fullName);
     });
   }, [assignableStaff, staffWorkload]);
+
+  // The suggested assignee is simply the top-ranked (least busy) active staff
+  // member. Only suggest once workloads have actually loaded, otherwise every
+  // load reads as 0 and the pick is arbitrary.
+  const suggestedStaff = !isWorkloadLoading && rankedStaff.length > 0 ? rankedStaff[0] : null;
+  const suggestedLoad = suggestedStaff
+    ? staffWorkload.find(w => w.id === suggestedStaff.id)?.totalActive ?? 0
+    : 0;
 
   const [commentText, setCommentText] = useState("");
   const [copied, setCopied] = useState(false);
@@ -809,11 +826,9 @@ export default function TicketDetail() {
                             <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                             <SelectContent>
                               <SelectItem value="unassigned">Unassigned</SelectItem>
-                              {rankedStaff
-                                .filter((s) => (s as { isActive?: boolean }).isActive !== false)
-                                .map((s, i) => {
+                              {rankedStaff.map((s) => {
                                 const load = staffWorkload.find(w => w.id === s.id)?.totalActive ?? 0;
-                                const isRecommended = i === 0 && load === Math.min(...rankedStaff.map(r => staffWorkload.find(w => w.id === r.id)?.totalActive ?? 0));
+                                const isRecommended = suggestedStaff?.id === s.id;
                                 return (
                                   <SelectItem key={s.id} value={s.id}>
                                     <span className="flex items-center gap-2">
@@ -826,9 +841,11 @@ export default function TicketDetail() {
                               })}
                             </SelectContent>
                           </Select>
-                          {rankedStaff.length > 0 && !ticket.assignedTo && (
+                          {suggestedStaff && !ticket.assignedTo && (
                             <p className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1">
-                              ★ Suggested based on current workload
+                              ★ Suggested:{" "}
+                              <span className="font-medium text-foreground">{suggestedStaff.fullName}</span>
+                              ({suggestedLoad} active) — based on current workload
                             </p>
                           )}
                           {isSupport && ticket.status === "open" && ticket.assignedTo?.id !== user?.id && (
