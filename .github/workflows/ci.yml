@@ -31,8 +31,41 @@ jobs:
       - name: Typecheck app
         run: pnpm --filter @workspace/itam run typecheck
 
+      - name: Unit tests
+        run: pnpm --filter @workspace/itam run test
+
       - name: Production build
         run: pnpm --filter @workspace/itam run build
 
       - name: Bundle budget
         run: pnpm --filter @workspace/itam run check:bundle
+
+  e2e-smoke:
+    # Browser smoke tests against the production build. Separate job so a
+    # browser-download hiccup never blocks the main typecheck/build gate.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Production build
+        run: pnpm --filter @workspace/itam run build
+
+      - name: Install Playwright browser
+        run: pnpm --filter @workspace/itam exec playwright install --with-deps chromium
+
+      - name: Browser smoke tests
+        run: pnpm --filter @workspace/itam run test:e2e
