@@ -645,8 +645,10 @@ export function useGetDashboardStats() {
         .limit(5);
 
       if (role === 'support_staff' && userId) {
-        ticketsQ = ticketsQ.eq('assigned_to', userId);
-        recentQ = recentQ.eq('assigned_to', userId);
+        // Support "My tickets" scope: assigned to them OR submitted by them
+        // (same union as the Tickets page grouping).
+        ticketsQ = ticketsQ.or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
+        recentQ = recentQ.or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
       } else if (role === 'general_user' && userId) {
         ticketsQ = ticketsQ.eq('created_by', userId);
         recentQ = recentQ.eq('created_by', userId);

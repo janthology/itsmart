@@ -183,9 +183,10 @@ export default function TicketsList() {
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
   if (scope === "mine") {
     // Only apply personal filter when no explicit assignee filter is active.
-    // Administrators get the union of tickets assigned to them and tickets
-    // they submitted; the render layer separates that union into groups.
-    if (isAdmin && assigneeFilter === "all") queryFilters.relatedTo = user?.id;
+    // Administrators and support staff get the union of tickets assigned to
+    // them and tickets they submitted; the render layer separates that union
+    // into groups.
+    if ((isAdmin || isSupport) && assigneeFilter === "all") queryFilters.relatedTo = user?.id;
     else if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
     else if (isSupport) queryFilters.assignedTo = user?.id;
   }
@@ -198,7 +199,7 @@ export default function TicketsList() {
     summaryQueryFilters.assignedTo = assigneeFilter;
   }
   if (scope === "mine") {
-    if (isAdmin && assigneeFilter === "all") summaryQueryFilters.relatedTo = user?.id ?? "";
+    if ((isAdmin || isSupport) && assigneeFilter === "all") summaryQueryFilters.relatedTo = user?.id ?? "";
     else if (!isAdmin && !isSupport) summaryQueryFilters.createdBy = user?.id ?? "";
     else if (isSupport) summaryQueryFilters.assignedTo = user?.id ?? "";
   }
@@ -228,21 +229,21 @@ export default function TicketsList() {
   }, [data, isAdmin, assigneeFilter, resolvedClosed, statusFilter]);
   const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const showAdminTicketGroups =
-    isAdmin && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
+  const showPersonalTicketGroups =
+    (isAdmin || isSupport) && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
   const assignedToMeTickets = useMemo(
     () =>
-      showAdminTicketGroups
+      showPersonalTicketGroups
         ? allTickets.filter((ticket) => ticket.assignedTo?.id === user?.id)
         : [],
-    [allTickets, showAdminTicketGroups, user?.id]
+    [allTickets, showPersonalTicketGroups, user?.id]
   );
   const submittedByMeTickets = useMemo(
     () =>
-      showAdminTicketGroups
+      showPersonalTicketGroups
         ? allTickets.filter((ticket) => ticket.createdBy.id === user?.id)
         : [],
-    [allTickets, showAdminTicketGroups, user?.id]
+    [allTickets, showPersonalTicketGroups, user?.id]
   );
 
   const baseForSummary = useMemo(() => {
@@ -310,11 +311,9 @@ export default function TicketsList() {
 
   const scopeLabel =
     scope === "mine"
-      ? isAdmin
+      ? isAdmin || isSupport
         ? "Tickets assigned to you or submitted by you"
-        : isSupport
-          ? "Tickets assigned to you"
-          : "Tickets you submitted"
+        : "Tickets you submitted"
       : "Organization-wide support queue";
 
   const typeLabels = Object.fromEntries(
@@ -348,11 +347,11 @@ export default function TicketsList() {
                 type="button"
                 onClick={() => {
                   setScope("mine");
-                  if (isAdmin) setAssigneeFilter("all");
+                  if (isAdmin || isSupport) setAssigneeFilter("all");
                 }}
                 className={`rounded-xl px-4 py-2 text-xs font-semibold transition-all ${scope === "mine" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
               >
-                {isSupport ? "Assigned to me" : "My tickets"}
+                My tickets
               </button>
               <button
                 type="button"
@@ -568,7 +567,7 @@ export default function TicketsList() {
                   </Button>
                 )}
               </div>
-            ) : showAdminTicketGroups ? (
+            ) : showPersonalTicketGroups ? (
               <div className="space-y-5">
                 <TicketGroupSection
                   title="Assigned to me"

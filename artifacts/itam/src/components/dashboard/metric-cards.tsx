@@ -74,7 +74,8 @@ export function MetricGrid({ metrics }: MetricGridProps) {
             : metrics.length === 5
               ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
               : metrics.length === 6
-                ? "grid-cols-2 sm:grid-cols-3"
+                ? // 3 x 2 — same column rhythm as the 9-card admin grid
+                  "grid-cols-2 sm:grid-cols-3 lg:grid-cols-3"
                 : metrics.length === 9
                   ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-3"
                   : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-5"
@@ -83,8 +84,8 @@ export function MetricGrid({ metrics }: MetricGridProps) {
       {metrics.map((metric) => {
         const styles = accentStyles[metric.accent];
         return (
-          <motion.div key={metric.title} variants={motionItem}>
-            <Link href={metric.href}>
+          <motion.div key={metric.title} variants={motionItem} className="h-full">
+            <Link href={metric.href} className="block h-full">
               <article
                 className={cn(
                   "group relative flex h-full flex-col overflow-hidden rounded-2xl border border-primary/10",
@@ -205,7 +206,7 @@ export function buildDashboardMetrics(
   if (role === "support_staff") {
     return [
       {
-        title: "My queue",
+        title: "My tickets",
         value: stats.totalTickets ?? 0,
         icon: TicketIcon,
         href: "/tickets?scope=mine",
@@ -226,11 +227,18 @@ export function buildDashboardMetrics(
         accent: "info",
       },
       {
-        title: "Resolved & closed",
-        value: stats.resolvedClosedTickets ?? stats.resolvedTickets ?? 0,
+        title: "Resolved",
+        value: stats.resolvedTickets ?? 0,
         icon: CheckCircle2,
-        href: "/tickets?status=resolved_closed&scope=mine",
+        href: "/tickets?status=resolved&scope=mine",
         accent: "success",
+      },
+      {
+        title: "Closed",
+        value: stats.closedTickets ?? 0,
+        icon: Archive,
+        href: "/tickets?status=closed&scope=mine",
+        accent: "violet",
       },
       {
         title: "My assets",

@@ -235,14 +235,15 @@ export default function Dashboard() {
           </motion.div>
 
         {showAdminGrid && (
-          <div className="grid gap-5 lg:grid-cols-2">
+          <div className="grid items-stretch gap-5 lg:grid-cols-2">
             {staffWorkload.length > 0 && (
-              <motion.div variants={motionItem}>
+              <motion.div variants={motionItem} className="h-full min-h-0">
                 <DashboardPanel
                   title="Team workload"
                   description="Active tickets per assignee (support staff and administrators)"
                   icon={<Users className="h-4 w-4" />}
                   action={{ label: "Tickets", href: "/tickets" }}
+                  className="h-full min-h-0"
                 >
                   <div className="divide-y divide-border/50">
                     {staffWorkload.map((staff) => {
@@ -296,16 +297,21 @@ export default function Dashboard() {
             )}
 
             {assetAnomalies.length > 0 && (
-              <motion.div variants={motionItem}>
+              <motion.div variants={motionItem} className="h-full min-h-0">
                 <DashboardPanel
                   title={`Asset alerts (${assetAnomalies.length})`}
-                  description="Items requiring review"
+                  description={
+                    assetAnomalies.length > 15
+                      ? `Showing top 15 of ${assetAnomalies.length} items requiring review`
+                      : "Items requiring review"
+                  }
                   icon={<AlertTriangle className="h-4 w-4 text-amber-600" />}
                   action={{ label: "Assets", href: "/assets" }}
                   accent="warning"
+                  className="h-full min-h-0"
                 >
-                  <div className="divide-y divide-border/50 max-h-[300px] overflow-y-auto">
-                    {assetAnomalies.slice(0, 6).map((anomaly) => {
+                  <div className="min-h-0 max-h-[70vh] flex-1 basis-0 divide-y divide-border/50 overflow-y-auto lg:max-h-none">
+                    {assetAnomalies.slice(0, 15).map((anomaly) => {
                       const icons = {
                         frequent_reassignment: Zap,
                         long_maintenance: Wrench,
