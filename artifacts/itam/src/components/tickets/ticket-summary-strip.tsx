@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import {
@@ -84,7 +85,7 @@ const FILTERS: {
   },
 ];
 
-export function TicketSummaryStrip({
+export const TicketSummaryStrip = memo(function TicketSummaryStrip({
   total,
   open,
   inProgress,
@@ -231,7 +232,7 @@ export function TicketSummaryStrip({
       </div>
     </aside>
   );
-}
+});
 
 export function getActiveTicketFilter(
   statusFilter: string,

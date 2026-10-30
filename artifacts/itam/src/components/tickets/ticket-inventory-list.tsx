@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { TicketCheck } from "lucide-react";
 import { TicketRow } from "@/components/tickets/ticket-row";
 import type { TicketCardData } from "@/components/tickets/ticket-card";
@@ -11,7 +12,7 @@ interface TicketInventoryListProps {
   emptyMessage?: string;
 }
 
-export function TicketInventoryList({
+export const TicketInventoryList = memo(function TicketInventoryList({
   tickets,
   total,
   typeLabels = {},
@@ -54,4 +55,4 @@ export function TicketInventoryList({
       </div>
     </div>
   );
-}
+});

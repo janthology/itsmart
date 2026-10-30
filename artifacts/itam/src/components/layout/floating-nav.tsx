@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -39,7 +40,9 @@ function getInitials(name: string) {
     .toUpperCase();
 }
 
-export function FloatingNav() {
+// Memoized: takes no props, so it never needs to re-render when page state
+// (dialogs, filters, forms) changes underneath it.
+export const FloatingNav = memo(function FloatingNav() {
   const [location] = useLocation();
   const { user, logout } = useAuth();
   const isAdmin = user?.role === "administrator";
@@ -226,4 +229,4 @@ export function FloatingNav() {
       </nav>
     </>
   );
-}
+});

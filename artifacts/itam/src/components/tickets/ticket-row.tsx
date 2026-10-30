@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Link } from "wouter";
 import { ChevronRight, Clock, TicketIcon, UserCheck, UserRound } from "lucide-react";
 import { format, formatDistanceToNow, isToday, isYesterday } from "date-fns";
@@ -81,7 +82,11 @@ interface TicketRowProps {
   index?: number;
 }
 
-export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
+// Memoized: rows are framer-motion components, so re-rendering all of them on
+// unrelated page state changes (e.g. opening the New ticket dialog) is a big
+// chunk of the click-to-paint cost. Props are stable (cached ticket objects,
+// string, number), so memo skips those renders safely.
+export const TicketRow = memo(function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
   const ticketNum = ticket.ticketNumber ?? `#${ticket.id.substring(0, 8)}`;
   const theme = STATUS_THEME[ticket.status] ?? STATUS_THEME.open;
   const priority = PRIORITY_THEME[ticket.priority] ?? PRIORITY_THEME.low;
@@ -262,4 +267,4 @@ export function TicketRow({ ticket, typeLabel, index = 0 }: TicketRowProps) {
       </Link>
     </motion.div>
   );
-}
+});

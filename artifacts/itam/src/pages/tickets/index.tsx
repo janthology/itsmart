@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useSearch } from "wouter";
 import { useGetTickets, useCreateTicket, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
@@ -55,7 +55,7 @@ interface TicketGroupSectionProps {
   typeLabels: Record<string, string>;
 }
 
-function TicketGroupSection({
+const TicketGroupSection = memo(function TicketGroupSection({
   title,
   subtitle,
   emptyMessage,
@@ -96,7 +96,7 @@ function TicketGroupSection({
       )}
     </section>
   );
-}
+});
 
 export default function TicketsList() {
   const { user } = useAuth();
@@ -165,11 +165,16 @@ export default function TicketsList() {
   }, [searchString]);
 
   const { data: assets } = useGetAssets();
-  // All assignable staff — support staff + administrators, sorted by name
+  // All assignable staff — support staff + administrators, sorted by name.
+  // Memoized so memoized children (toolbar) receive a stable reference.
   const { data: allUsers } = useGetUsers();
-  const assignableStaff = (allUsers ?? [])
-    .filter(u => u.role === 'support_staff' || u.role === 'administrator')
-    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const assignableStaff = useMemo(
+    () =>
+      (allUsers ?? [])
+        .filter(u => u.role === 'support_staff' || u.role === 'administrator')
+        .sort((a, b) => a.fullName.localeCompare(b.fullName)),
+    [allUsers]
+  );
   const createMutation = useCreateTicket();
 
   const queryFilters: any = {
@@ -227,7 +232,10 @@ export default function TicketsList() {
     }
     return base;
   }, [data, isAdmin, assigneeFilter, resolvedClosed, statusFilter]);
-  const pagedTickets = allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pagedTickets = useMemo(
+    () => allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [allTickets, page]
+  );
 
   const showPersonalTicketGroups =
     (isAdmin || isSupport) && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
@@ -303,11 +311,34 @@ export default function TicketsList() {
 
   const hasActiveFilters = statusFilter !== "all" || resolvedClosed || priorityFilter !== "all" || (isAdmin && assigneeFilter !== "all") || search;
 
-  const handleStripFilter = (filter: ReturnType<typeof getActiveTicketFilter>) => {
+  const handleStripFilter = useCallback((filter: ReturnType<typeof getActiveTicketFilter>) => {
     const next = applyTicketFilter(filter);
     setStatusFilter(next.statusFilter);
     setResolvedClosed(next.resolvedClosed);
-  };
+  }, []);
+
+  // Stable handlers so memoized toolbar/list children skip re-renders when
+  // unrelated state changes (notably opening/closing the New ticket dialog).
+  const handleSearchChange = useCallback(
+    (val: string) => {
+      setSearch(val);
+      if (val) {
+        setStatusFilter("all");
+        setResolvedClosed(false);
+        setPriorityFilter("all");
+        if (!isAdmin) setScope("all");
+      }
+    },
+    [isAdmin]
+  );
+
+  const handleClearFilters = useCallback(() => {
+    setSearch("");
+    setStatusFilter("all");
+    setResolvedClosed(false);
+    setPriorityFilter("all");
+    setAssigneeFilter("all");
+  }, []);
 
   const scopeLabel =
     scope === "mine"
@@ -316,8 +347,9 @@ export default function TicketsList() {
         : "Tickets you submitted"
       : "Organization-wide support queue";
 
-  const typeLabels = Object.fromEntries(
-    Object.values(TicketType).map((t) => [t, TICKET_TYPE_LABEL[t]])
+  const typeLabels = useMemo(
+    () => Object.fromEntries(Object.values(TicketType).map((t) => [t, TICKET_TYPE_LABEL[t]])),
+    []
   );
 
   return (
@@ -500,15 +532,7 @@ export default function TicketsList() {
           <div className="min-w-0 space-y-4">
             <TicketToolbar
               search={search}
-              onSearchChange={(val) => {
-                setSearch(val);
-                if (val) {
-                  setStatusFilter("all");
-                  setResolvedClosed(false);
-                  setPriorityFilter("all");
-                  if (!isAdmin) setScope("all");
-                }
-              }}
+              onSearchChange={handleSearchChange}
               priorityFilter={priorityFilter}
               onPriorityChange={setPriorityFilter}
               assigneeFilter={assigneeFilter}
@@ -516,13 +540,7 @@ export default function TicketsList() {
               assignableStaff={assignableStaff}
               isAdmin={isAdmin}
               hasActiveFilters={Boolean(hasActiveFilters)}
-              onClearFilters={() => {
-                setSearch("");
-                setStatusFilter("all");
-                setResolvedClosed(false);
-                setPriorityFilter("all");
-                setAssigneeFilter("all");
-              }}
+              onClearFilters={handleClearFilters}
             />
 
             {isLoading ? (

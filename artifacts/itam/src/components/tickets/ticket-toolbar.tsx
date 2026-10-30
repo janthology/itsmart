@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Search, X, Keyboard } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -30,7 +31,7 @@ interface TicketToolbarProps {
   onClearFilters: () => void;
 }
 
-export function TicketToolbar({
+export const TicketToolbar = memo(function TicketToolbar({
   search,
   onSearchChange,
   priorityFilter,
@@ -116,4 +117,4 @@ export function TicketToolbar({
       </div>
     </div>
   );
-}
+});

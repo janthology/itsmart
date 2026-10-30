@@ -1,4 +1,7 @@
-export function AmbientBackground() {
+import { memo } from "react";
+
+// Memoized: static decorative layers with no props — never re-render.
+export const AmbientBackground = memo(function AmbientBackground() {
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-10%,hsl(207_55%_62%/0.14),transparent_55%)] dark:opacity-40" />
@@ -17,4 +20,4 @@ export function AmbientBackground() {
       />
     </div>
   );
-}
+});
