@@ -701,7 +701,6 @@ export default function TicketDetail() {
                   {ticket.status === 'closed' ? (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-border/50 bg-muted/30 text-sm text-muted-foreground">
-                        <StatusBadge status="closed" />
                         <span>
                           This ticket is closed — no further actions allowed.{" "}
                           {wasResolvedBeforeClose
