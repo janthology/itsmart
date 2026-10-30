@@ -15,7 +15,7 @@ import { format } from "date-fns";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { SLABadge } from "@/components/ui/sla-badge";
-import { cn } from "@/lib/utils";
+import { cn, escapeHtml } from "@/lib/utils";
 
 function priorityStripe(priority: string) {
   if (priority === "critical") return "bg-red-500";
@@ -273,16 +273,26 @@ export default function TicketDetail() {
   const handlePrint = () => {
     if (!ticket) return;
     const win = window.open('', '_blank', 'width=800,height=900');
-    if (!win) return;
+    if (!win) {
+      toast({
+        variant: "destructive",
+        title: "Popup blocked",
+        description: "Allow popups for this site to print the ticket.",
+      });
+      return;
+    }
+    // Every user-controlled value interpolated into this HTML string MUST be
+    // escaped — this document is written outside React, so nothing is
+    // auto-escaped and raw ticket/comment text would become stored XSS.
     const comments = ticket.comments.map((c: { createdBy: { fullName: string }; createdAt: string; commentText: string }) => `
       <div style="margin-bottom:12px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;">
         <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-          <strong>${c.createdBy.fullName}</strong>
+          <strong>${escapeHtml(c.createdBy.fullName)}</strong>
           <span style="color:#64748b;font-size:12px;">${format(new Date(c.createdAt), 'MMM d, yyyy h:mm a')}</span>
         </div>
-        <p style="margin:0;white-space:pre-wrap;font-size:13px;">${c.commentText}</p>
+        <p style="margin:0;white-space:pre-wrap;font-size:13px;">${escapeHtml(c.commentText)}</p>
       </div>`).join('');
-    win.document.write(`<!DOCTYPE html><html><head><title>${(ticket as any).ticketNumber ?? ticket.id}</title>
+    win.document.write(`<!DOCTYPE html><html><head><title>${escapeHtml((ticket as any).ticketNumber ?? ticket.id)}</title>
       <style>body{font-family:Arial,sans-serif;padding:32px;max-width:800px;margin:0 auto;color:#1e293b;}
       h1{font-size:20px;margin-bottom:4px;}
       .meta{color:#64748b;font-size:13px;margin-bottom:24px;}
@@ -290,15 +300,15 @@ export default function TicketDetail() {
       .desc{background:#f8fafc;padding:16px;border-radius:8px;margin-bottom:24px;white-space:pre-wrap;font-size:14px;}
       @media print{body{padding:16px;}}</style></head><body>
       <p style="color:#355872;font-weight:700;font-size:13px;margin-bottom:8px;">ITSMART — Support Ticket</p>
-      <h1>${ticket.title}</h1>
+      <h1>${escapeHtml(ticket.title)}</h1>
       <p class="meta">
-        <span class="badge" style="background:#dbeafe;color:#1e40af;">${(ticket as any).ticketNumber ?? ticket.id.substring(0,8)}</span>
-        <span class="badge" style="background:#fef3c7;color:#92400e;">${ticket.priority}</span>
-        <span class="badge" style="background:#e0f2fe;color:#0369a1;">${ticket.status.replace(/_/g,' ')}</span>
-        &nbsp;|&nbsp; Opened by ${ticket.createdBy.fullName} on ${format(new Date(ticket.createdAt), 'MMMM d, yyyy h:mm a')}
-        ${ticket.assignedTo ? `&nbsp;|&nbsp; Assigned to ${ticket.assignedTo.fullName}` : ''}
+        <span class="badge" style="background:#dbeafe;color:#1e40af;">${escapeHtml((ticket as any).ticketNumber ?? ticket.id.substring(0,8))}</span>
+        <span class="badge" style="background:#fef3c7;color:#92400e;">${escapeHtml(ticket.priority)}</span>
+        <span class="badge" style="background:#e0f2fe;color:#0369a1;">${escapeHtml(ticket.status.replace(/_/g,' '))}</span>
+        &nbsp;|&nbsp; Opened by ${escapeHtml(ticket.createdBy.fullName)} on ${format(new Date(ticket.createdAt), 'MMMM d, yyyy h:mm a')}
+        ${ticket.assignedTo ? `&nbsp;|&nbsp; Assigned to ${escapeHtml(ticket.assignedTo.fullName)}` : ''}
       </p>
-      <div class="desc">${ticket.description}</div>
+      <div class="desc">${escapeHtml(ticket.description)}</div>
       <h2 style="font-size:15px;margin-bottom:12px;">Activity Log (${ticket.comments.length} entries)</h2>
       ${comments}
       <p style="color:#94a3b8;font-size:11px;margin-top:24px;">Printed on ${format(new Date(), 'MMMM d, yyyy h:mm a')}</p>

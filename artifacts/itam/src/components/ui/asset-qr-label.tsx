@@ -3,6 +3,8 @@ import QRCode from "qrcode";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QrCode, Printer } from "lucide-react";
+import { escapeHtml } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface AssetQRLabelProps {
   assetTag: string;
@@ -13,6 +15,7 @@ interface AssetQRLabelProps {
 }
 
 export function AssetQRLabel({ assetTag, assetName, category, location, serialNumber }: AssetQRLabelProps) {
+  const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
 
@@ -31,13 +34,20 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
     if (!qrDataUrl) return;
 
     const win = window.open("", "_blank", "width=400,height=500");
-    if (!win) return;
+    if (!win) {
+      toast({
+        variant: "destructive",
+        title: "Popup blocked",
+        description: "Allow popups for this site to print the label.",
+      });
+      return;
+    }
 
     win.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Asset Label — ${assetTag}</title>
+        <title>Asset Label — ${escapeHtml(assetTag)}</title>
         <style>
           * { margin: 0; padding: 0; box-sizing: border-box; }
           body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: flex-start; padding: 24px; background: #fff; }
@@ -84,13 +94,13 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
         <div class="label">
           <div class="header">DOST — IT Asset</div>
           <img class="qr" src="${qrDataUrl}" alt="QR Code" />
-          <div class="tag">${assetTag}</div>
+          <div class="tag">${escapeHtml(assetTag)}</div>
           <div class="divider"></div>
-          <div class="name">${assetName}</div>
+          <div class="name">${escapeHtml(assetName)}</div>
           <div class="meta">
-            ${category.charAt(0).toUpperCase() + category.slice(1)}
-            ${location ? `<br/>${location}` : ""}
-            ${serialNumber ? `<br/>S/N: ${serialNumber}` : ""}
+            ${escapeHtml(category.charAt(0).toUpperCase() + category.slice(1))}
+            ${location ? `<br/>${escapeHtml(location)}` : ""}
+            ${serialNumber ? `<br/>S/N: ${escapeHtml(serialNumber)}` : ""}
           </div>
         </div>
         <script>window.onload = () => { window.print(); window.close(); }<\/script>

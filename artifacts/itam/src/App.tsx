@@ -6,10 +6,11 @@ import { AuthProvider, useAuth } from "./lib/auth-context";
 import { NotificationsProvider } from "./lib/notifications-context";
 import { ThemeProvider } from "@/components/layout/theme-provider";
 import { Loader2 } from "lucide-react";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 // Pages
 import Login from "./pages/login";
-import Register from "./pages/register";
+
 import Dashboard from "./pages/dashboard";
 import AssetsList from "./pages/assets/index";
 import AssetDetail from "./pages/assets/detail";
@@ -59,7 +60,9 @@ function Router() {
   return (
     <Switch>
       <Route path="/login" component={Login} />
-      <Route path="/register" component={Register} />
+      {/* Public signup is disabled — accounts are created by administrators.
+          Keep /register as a redirect so old links/bookmarks land on login. */}
+      <Route path="/register">{() => <Redirect to="/login" />}</Route>
 
       <Route path="/dashboard">{() => <ProtectedRoute component={Dashboard} />}</Route>
       <Route path="/assets">{() => <ProtectedRoute component={AssetsList} />}</Route>
@@ -89,7 +92,9 @@ function App() {
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <AuthProvider>
               <NotificationsProvider>
-                <Router />
+                <ErrorBoundary>
+                  <Router />
+                </ErrorBoundary>
                 <Toaster />
               </NotificationsProvider>
             </AuthProvider>
