@@ -1,0 +1,38 @@
+name: CI
+
+# Safety net: every push and pull request must typecheck and build.
+# This intentionally does not deploy anything — production deploys stay on Vercel.
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+
+jobs:
+  typecheck-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspace libraries (types)
+        run: pnpm exec tsc -b lib/api-client-react
+
+      - name: Typecheck app
+        run: pnpm --filter @workspace/itam run typecheck
+
+      - name: Production build
+        run: pnpm --filter @workspace/itam run build
