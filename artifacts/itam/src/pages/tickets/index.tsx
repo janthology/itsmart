@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
 import { useSearch } from "wouter";
-import { useGetTickets, useCreateTicket, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets } from "@/lib/supabase-queries";
+import { useGetTickets, useGetTicketSummary, useCreateTicket, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets, type TicketQueryFilters } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PaginationBar } from "@/components/ui/pagination-bar";
@@ -53,6 +53,10 @@ interface TicketGroupSectionProps {
   emptyMessage: string;
   tickets: TicketCardData[];
   typeLabels: Record<string, string>;
+  /** When set, `tickets` is already the current server page and this is the real total. */
+  serverTotal?: number;
+  page?: number;
+  onPageChange?: (page: number) => void;
 }
 
 const TicketGroupSection = memo(function TicketGroupSection({
@@ -61,40 +65,116 @@ const TicketGroupSection = memo(function TicketGroupSection({
   emptyMessage,
   tickets,
   typeLabels,
+  serverTotal,
+  page,
+  onPageChange,
 }: TicketGroupSectionProps) {
   const [groupPage, setGroupPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(tickets.length / PAGE_SIZE));
-  const safePage = Math.min(groupPage, totalPages);
-  const pagedGroupTickets = tickets.slice(
-    (safePage - 1) * PAGE_SIZE,
-    safePage * PAGE_SIZE
-  );
+  const serverPaged = serverTotal !== undefined;
+  const totalForPaging = serverTotal ?? tickets.length;
+  const totalPages = Math.max(1, Math.ceil(totalForPaging / PAGE_SIZE));
+  const safePage = Math.min(page ?? groupPage, totalPages);
+  const visibleTickets = serverPaged
+    ? tickets
+    : tickets.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   useEffect(() => {
-    setGroupPage(1);
-  }, [title, tickets.length]);
+    if (!serverPaged) setGroupPage(1);
+  }, [title, tickets.length, serverPaged]);
 
   return (
     <section aria-label={title} className="space-y-4">
       <TicketInventoryList
-        tickets={pagedGroupTickets}
-        total={tickets.length}
+        tickets={visibleTickets}
+        total={totalForPaging}
         typeLabels={typeLabels}
         title={title}
         subtitle={subtitle}
         emptyMessage={emptyMessage}
       />
-      {tickets.length > PAGE_SIZE && (
+      {totalForPaging > PAGE_SIZE && (
         <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/70 shadow-sm">
           <PaginationBar
             page={safePage}
             pageSize={PAGE_SIZE}
-            total={tickets.length}
-            onPage={setGroupPage}
+            total={totalForPaging}
+            onPage={onPageChange ?? setGroupPage}
           />
         </div>
       )}
     </section>
+  );
+});
+
+interface PagedTicketGroupProps {
+  userId: string;
+  mode: "assigned" | "submitted";
+  filters: TicketQueryFilters;
+  typeLabels: Record<string, string>;
+}
+
+/**
+ * One personal-queue section ("Assigned to me" / "Submitted by me") backed
+ * by its own server-paged query, so the personal view never downloads the
+ * whole assigned-or-submitted union just to slice it in the browser.
+ */
+const PagedTicketGroup = memo(function PagedTicketGroup({
+  userId,
+  mode,
+  filters,
+  typeLabels,
+}: PagedTicketGroupProps) {
+  const [groupPage, setGroupPage] = useState(1);
+
+  useEffect(() => {
+    setGroupPage(1);
+  }, [filters.search, filters.status, filters.lifecycle, filters.priority]);
+
+  // The parent "My tickets" filters carry relatedTo=<me>; each section
+  // narrows that union to just one side, so the union scope is dropped here.
+  const { relatedTo: _relatedTo, assignedTo: _assignedTo, createdBy: _createdBy, ...sectionFilters } = filters;
+
+  const { data, isLoading } = useGetTickets({
+    query: {
+      ...sectionFilters,
+      ...(mode === "assigned" ? { assignedTo: userId } : { createdBy: userId }),
+      page: groupPage,
+      pageSize: PAGE_SIZE,
+    },
+  });
+
+  const copy =
+    mode === "assigned"
+      ? {
+          title: "Assigned to me",
+          subtitle: "Support tickets assigned to you",
+          emptyMessage: "No tickets are currently assigned to you.",
+        }
+      : {
+          title: "Submitted by me",
+          subtitle: "Support tickets you submitted",
+          emptyMessage: "You have not submitted any support tickets.",
+        };
+
+  if (isLoading && !data) {
+    return (
+      <section aria-label={copy.title} className="space-y-2 rounded-3xl border border-border/60 bg-card/60 p-2">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-[72px] rounded-xl bg-muted/40 animate-pulse" />
+        ))}
+      </section>
+    );
+  }
+
+  return (
+    <TicketGroupSection
+      {...copy}
+      tickets={(data?.data ?? []) as TicketCardData[]}
+      serverTotal={data?.total ?? 0}
+      page={groupPage}
+      onPageChange={setGroupPage}
+      typeLabels={typeLabels}
+    />
   );
 });
 
@@ -177,111 +257,79 @@ export default function TicketsList() {
   );
   const createMutation = useCreateTicket();
 
-  const queryFilters: any = {
+  // Status state maps to server-side filters: "Resolved" is a lifecycle
+  // filter (it also includes tickets that were resolved before being
+  // closed), and resolvedClosed is the combined Resolved + Closed view.
+  const statusServerFilters: Pick<TicketQueryFilters, "status" | "lifecycle"> = resolvedClosed
+    ? { lifecycle: "resolved_closed" }
+    : statusFilter === "resolved"
+      ? { lifecycle: "resolved" }
+      : statusFilter !== "all"
+        ? { status: statusFilter as TicketQueryFilters["status"] }
+        : {};
+
+  const queryFilters: TicketQueryFilters = {
     search: search || undefined,
-    // "Resolved" is a lifecycle filter (it also includes tickets that were
-    // resolved before being closed), so it is applied client-side below
-    // instead of as an exact status match on the server query.
-    status: statusFilter !== "all" && statusFilter !== "resolved" ? statusFilter as any : undefined,
-    priority: priorityFilter !== "all" ? priorityFilter as any : undefined,
+    ...statusServerFilters,
+    priority: priorityFilter !== "all" ? (priorityFilter as TicketQueryFilters["priority"]) : undefined,
   };
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") queryFilters.assignedTo = assigneeFilter;
+  if (isAdmin && assigneeFilter === "unassigned") queryFilters.unassigned = true;
   if (scope === "mine") {
     // Only apply personal filter when no explicit assignee filter is active.
     // Administrators and support staff get the union of tickets assigned to
     // them and tickets they submitted; the render layer separates that union
-    // into groups.
+    // into groups, each with its own server-paged query.
     if ((isAdmin || isSupport) && assigneeFilter === "all") queryFilters.relatedTo = user?.id;
     else if (!isAdmin && !isSupport) queryFilters.createdBy = user?.id;
     else if (isSupport) queryFilters.assignedTo = user?.id;
   }
 
-  const { data, isLoading } = useGetTickets({ query: queryFilters });
+  const showPersonalTicketGroups =
+    (isAdmin || isSupport) && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
 
-  // Queue mix uses scope-only data — not narrowed by status, priority, or search
-  const summaryQueryFilters: Record<string, string> = {};
+  // Main list: one server page at a time (skipped entirely in the grouped
+  // personal view, whose sections run their own paged queries).
+  const { data, isLoading } = useGetTickets({
+    query: { ...queryFilters, page, pageSize: PAGE_SIZE },
+    enabled: !showPersonalTicketGroups,
+  });
+  const listTickets = data?.data ?? [];
+  const listTotal = data?.total ?? 0;
+
+  // Queue mix uses scope-only counts — not narrowed by status, priority, or
+  // search — computed with exact head-count queries, no row downloads.
+  const summaryQueryFilters: Pick<TicketQueryFilters, "assignedTo" | "createdBy" | "relatedTo" | "unassigned"> = {};
   if (isAdmin && assigneeFilter !== "all" && assigneeFilter !== "unassigned") {
     summaryQueryFilters.assignedTo = assigneeFilter;
   }
+  if (isAdmin && assigneeFilter === "unassigned") summaryQueryFilters.unassigned = true;
   if (scope === "mine") {
-    if ((isAdmin || isSupport) && assigneeFilter === "all") summaryQueryFilters.relatedTo = user?.id ?? "";
-    else if (!isAdmin && !isSupport) summaryQueryFilters.createdBy = user?.id ?? "";
-    else if (isSupport) summaryQueryFilters.assignedTo = user?.id ?? "";
+    if ((isAdmin || isSupport) && assigneeFilter === "all") summaryQueryFilters.relatedTo = user?.id;
+    else if (!isAdmin && !isSupport) summaryQueryFilters.createdBy = user?.id;
+    else if (isSupport) summaryQueryFilters.assignedTo = user?.id;
   }
-  const { data: summaryData } = useGetTickets({ query: summaryQueryFilters });
+  const { data: summaryData } = useGetTicketSummary({ query: summaryQueryFilters });
 
   // Reset to page 1 when filters change
   useEffect(() => { setPage(1); }, [search, statusFilter, resolvedClosed, priorityFilter, assigneeFilter, scope]);
 
-  const allTickets = useMemo(() => {
-    let base = data?.data ?? [];
-    if (statusFilter === "resolved" && !resolvedClosed) {
-      // Resolved includes tickets currently in Resolved and tickets that were
-      // resolved before they were closed (their resolved_at is retained).
-      base = base.filter(
-        (t: { status: string; resolvedAt?: string | null }) =>
-          t.status === "resolved" || (t.status === "closed" && Boolean(t.resolvedAt))
-      );
-    }
-    // Multi-status filter: resolved + closed together (from dashboard "Resolved & Closed" card)
-    if (resolvedClosed) {
-      base = base.filter((t: { status: string }) => t.status === 'resolved' || t.status === 'closed');
-    }
-    if (isAdmin && assigneeFilter === "unassigned") {
-      base = base.filter((t) => !t.assignedTo);
-    }
-    return base;
-  }, [data, isAdmin, assigneeFilter, resolvedClosed, statusFilter]);
-  const pagedTickets = useMemo(
-    () => allTickets.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [allTickets, page]
-  );
-
-  const showPersonalTicketGroups =
-    (isAdmin || isSupport) && scope === "mine" && assigneeFilter === "all" && Boolean(user?.id);
-  const assignedToMeTickets = useMemo(
-    () =>
-      showPersonalTicketGroups
-        ? allTickets.filter((ticket) => ticket.assignedTo?.id === user?.id)
-        : [],
-    [allTickets, showPersonalTicketGroups, user?.id]
-  );
-  const submittedByMeTickets = useMemo(
-    () =>
-      showPersonalTicketGroups
-        ? allTickets.filter((ticket) => ticket.createdBy.id === user?.id)
-        : [],
-    [allTickets, showPersonalTicketGroups, user?.id]
-  );
-
-  const baseForSummary = useMemo(() => {
-    let base = summaryData?.data ?? [];
-    if (isAdmin && assigneeFilter === "unassigned") {
-      base = base.filter((t) => !t.assignedTo);
-    }
-    return base;
-  }, [summaryData, isAdmin, assigneeFilter]);
-
   const summary = useMemo(
     () => ({
-      total: baseForSummary.length,
-      open: baseForSummary.filter((t: { status: string }) => t.status === "open").length,
-      inProgress: baseForSummary.filter((t: { status: string }) => t.status === "in_progress").length,
-      onHold: baseForSummary.filter((t: { status: string }) => t.status === "on_hold").length,
-      // A ticket closed after being resolved counts under both Resolved and
-      // Closed; a ticket closed directly (no resolved_at) counts only as Closed.
-      resolved: baseForSummary.filter(
-        (t: { status: string; resolvedAt?: string | null }) =>
-          t.status === "resolved" || (t.status === "closed" && Boolean(t.resolvedAt))
-      ).length,
-      closed: baseForSummary.filter((t: { status: string }) => t.status === "closed").length,
-      resolvedBeforeClosed: baseForSummary.filter(
-        (t: { status: string; resolvedAt?: string | null }) =>
-          t.status === "closed" && Boolean(t.resolvedAt)
-      ).length,
+      total: summaryData?.total ?? 0,
+      open: summaryData?.open ?? 0,
+      inProgress: summaryData?.inProgress ?? 0,
+      onHold: summaryData?.onHold ?? 0,
+      resolved: summaryData?.resolved ?? 0,
+      closed: summaryData?.closed ?? 0,
+      resolvedBeforeClosed: summaryData?.resolvedBeforeClosed ?? 0,
+      resolvedClosed: summaryData?.resolvedClosed ?? 0,
     }),
-    [baseForSummary]
+    [summaryData]
   );
+
+  /** Ticket count shown in the page header for the current view. */
+  const headerTicketCount = showPersonalTicketGroups ? summary.total : listTotal;
 
   const activeStatusFilter = getActiveTicketFilter(statusFilter, resolvedClosed);
 
@@ -299,6 +347,7 @@ export default function TicketsList() {
       }});
       setCreateSuccess(true);
       queryClient.invalidateQueries({ queryKey: ['tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['ticketSummary'] });
       setTimeout(() => {
         setIsDialogOpen(false);
         setCreateSuccess(false);
@@ -367,7 +416,7 @@ export default function TicketsList() {
               {!isLoading && (
                 <span className="font-medium text-foreground">
                   {" "}
-                  · {allTickets.length} ticket{allTickets.length === 1 ? "" : "s"}
+                  · {headerTicketCount} ticket{headerTicketCount === 1 ? "" : "s"}
                 </span>
               )}
             </p>
@@ -549,7 +598,7 @@ export default function TicketsList() {
                   <div key={i} className="h-[72px] rounded-xl bg-muted/40 animate-pulse" />
                 ))}
               </div>
-            ) : !allTickets.length ? (
+            ) : !showPersonalTicketGroups && !listTickets.length ? (
               <div className="flex flex-col items-center justify-center rounded-3xl border border-border/50 bg-card/75 p-16 text-center shadow-sm">
                 <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/[0.08] ring-1 ring-primary/15">
                   <TicketIcon className="h-8 w-8 text-primary/60" />
@@ -587,30 +636,28 @@ export default function TicketsList() {
               </div>
             ) : showPersonalTicketGroups ? (
               <div className="space-y-5">
-                <TicketGroupSection
-                  title="Assigned to me"
-                  subtitle="Support tickets assigned to you"
-                  emptyMessage="No tickets are currently assigned to you."
-                  tickets={assignedToMeTickets as TicketCardData[]}
+                <PagedTicketGroup
+                  userId={user!.id}
+                  mode="assigned"
+                  filters={queryFilters}
                   typeLabels={typeLabels}
                 />
-                <TicketGroupSection
-                  title="Submitted by me"
-                  subtitle="Support tickets you submitted"
-                  emptyMessage="You have not submitted any support tickets."
-                  tickets={submittedByMeTickets as TicketCardData[]}
+                <PagedTicketGroup
+                  userId={user!.id}
+                  mode="submitted"
+                  filters={queryFilters}
                   typeLabels={typeLabels}
                 />
               </div>
             ) : (
               <>
                 <TicketInventoryList
-                  tickets={pagedTickets as any}
-                  total={allTickets.length}
+                  tickets={listTickets as any}
+                  total={listTotal}
                   typeLabels={typeLabels}
                 />
                 <div className="overflow-hidden rounded-2xl border border-border/50 bg-card/70 shadow-sm">
-                  <PaginationBar page={page} pageSize={PAGE_SIZE} total={allTickets.length} onPage={setPage} />
+                  <PaginationBar page={page} pageSize={PAGE_SIZE} total={listTotal} onPage={setPage} />
                 </div>
               </>
             )}

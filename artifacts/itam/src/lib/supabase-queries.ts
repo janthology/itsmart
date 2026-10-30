@@ -201,6 +201,25 @@ export function useGetCurrentUser() {
   });
 }
 
+/**
+ * Fetches every row matching a query by paging through in 1,000-row
+ * chunks. A single PostgREST response is silently capped at 1,000 rows,
+ * so unbounded selects lose data without any error once a table grows
+ * past that. The query MUST include a deterministic .order() (with an
+ * id tiebreak) so pages never overlap or skip rows.
+ */
+async function fetchAllRows<T>(buildQuery: () => any): Promise<T[]> {
+  const rows: T[] = [];
+  const CHUNK = 1000;
+  for (let start = 0; ; start += CHUNK) {
+    const { data, error } = await buildQuery().range(start, start + CHUNK - 1);
+    if (error) throw error;
+    rows.push(...((data ?? []) as T[]));
+    if (!data || data.length < CHUNK) break;
+  }
+  return rows;
+}
+
 // ─── ASSETS ──────────────────────────────────────────────────────────────────
 
 const ASSET_SELECT = '*, assigned_to_profile:profiles!assets_assigned_to_fkey(*)';
@@ -216,20 +235,30 @@ export function useGetAssets(opts?: { query?: { search?: string; status?: AssetS
     queryKey: ['assets', search, status, category, assignedTo],
     enabled: !!authed,
     queryFn: async () => {
-      let q = supabase.from('assets').select(ASSET_SELECT).order('created_at', { ascending: false });
-      // Only apply server-side text filter when NOT searching (search is handled client-side
-      // so category enum can be included in the match)
-      // Always apply non-text filters server-side
-      if (status) q = q.eq('status', status);
-      if (assignedTo) q = q.eq('assigned_to', assignedTo);
-      // Category is applied server-side when there's no search term; when
-      // searching, it's re-applied client-side after the text filter so that
-      // both conditions are respected together.
-      if (!search && category) q = q.eq('category', category);
+      // Fetch in 1,000-row pages: a single PostgREST response is silently
+      // capped at 1,000 rows, so an unbounded select would lose assets
+      // without any error once the table grows past that.
+      const buildQuery = () => {
+        let q = supabase.from('assets').select(ASSET_SELECT).order('created_at', { ascending: false }).order('id', { ascending: false });
+        // Always apply non-text filters server-side
+        if (status) q = q.eq('status', status);
+        if (assignedTo) q = q.eq('assigned_to', assignedTo);
+        // Category is applied server-side when there's no search term; when
+        // searching, it's re-applied client-side after the text filter so that
+        // both conditions are respected together.
+        if (!search && category) q = q.eq('category', category);
+        return q;
+      };
 
-      const { data, error } = await q;
-      if (error) throw error;
-      let assets = (data ?? []).map(mapAsset);
+      const rows: any[] = [];
+      const CHUNK = 1000;
+      for (let start = 0; ; start += CHUNK) {
+        const { data, error } = await buildQuery().range(start, start + CHUNK - 1);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < CHUNK) break;
+      }
+      let assets = rows.map(mapAsset);
       // Client-side search across name, tag, and category
       if (search) {
         const term = search.toLowerCase();
@@ -241,7 +270,7 @@ export function useGetAssets(opts?: { query?: { search?: string; status?: AssetS
         // Re-apply category filter when search is also active
         if (category) assets = assets.filter(a => a.category === category);
       }
-      return { data: assets, total: assets.length, page: 1, limit: 100 };
+      return { data: assets, total: assets.length, page: 1, limit: assets.length };
     },
   });
 }
@@ -333,45 +362,194 @@ const TICKET_SELECT = `
   asset:assets(*, assigned_to_profile:profiles!assets_assigned_to_fkey(*))
 `;
 
-export function useGetTickets(opts?: { query?: { search?: string; status?: TicketStatus; priority?: TicketPriority; createdBy?: string; assignedTo?: string; relatedTo?: string } }) {
-  const search = opts?.query?.search;
-  const status = opts?.query?.status;
-  const priority = opts?.query?.priority;
-  const createdBy = opts?.query?.createdBy;
-  const assignedTo = opts?.query?.assignedTo;
-  const relatedTo = opts?.query?.relatedTo;
+export interface TicketQueryFilters {
+  search?: string;
+  status?: TicketStatus;
+  /** Lifecycle filters spanning statuses: "resolved" = resolved now + closed-after-resolved; "resolved_closed" = either. */
+  lifecycle?: 'resolved' | 'resolved_closed';
+  priority?: TicketPriority;
+  createdBy?: string;
+  assignedTo?: string;
+  relatedTo?: string;
+  unassigned?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+export function useGetTickets(opts?: { query?: TicketQueryFilters; enabled?: boolean }) {
+  const query = opts?.query;
+  const search = query?.search;
+  const status = query?.status;
+  const lifecycle = query?.lifecycle;
+  const priority = query?.priority;
+  const createdBy = query?.createdBy;
+  const assignedTo = query?.assignedTo;
+  const relatedTo = query?.relatedTo;
+  const unassigned = query?.unassigned;
+  const page = query?.page;
+  const pageSize = query?.pageSize;
   const { data: authed } = useHasSession();
 
   return useQuery<TicketListResponse>({
-    queryKey: ['tickets', search, status, priority, createdBy, assignedTo, relatedTo],
+    queryKey: ['tickets', search, status, lifecycle, priority, createdBy, assignedTo, relatedTo, unassigned, page, pageSize],
+    enabled: !!authed && (opts?.enabled ?? true),
+    queryFn: async () => {
+      // Server-side search: match title / ticket number directly, and
+      // requester names via a profile lookup (embedded profile columns
+      // cannot be filtered reliably through PostgREST).
+      let requesterIds: string[] = [];
+      if (search) {
+        const likeSafe = search.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('full_name', `%${likeSafe}%`)
+          .limit(25);
+        requesterIds = (profiles ?? []).map((p: { id: string }) => p.id);
+      }
+
+      const buildQuery = () => {
+        let q = supabase
+          .from('tickets')
+          .select(TICKET_SELECT, page && pageSize ? { count: 'exact' } : undefined)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false });
+
+        if (lifecycle === 'resolved') {
+          // Resolved now, plus closed tickets that were resolved first.
+          q = q.or('status.eq.resolved,and(status.eq.closed,resolved_at.not.is.null)');
+        } else if (lifecycle === 'resolved_closed') {
+          q = q.in('status', ['resolved', 'closed']);
+        } else if (status) {
+          q = q.eq('status', status);
+        }
+        if (priority) q = q.eq('priority', priority);
+        if (relatedTo) {
+          // Personal queue: tickets assigned to the user OR submitted by them.
+          q = q.or(`assigned_to.eq.${relatedTo},created_by.eq.${relatedTo}`);
+        } else {
+          if (createdBy) q = q.eq('created_by', createdBy);
+          if (assignedTo) q = q.eq('assigned_to', assignedTo);
+        }
+        if (unassigned) q = q.is('assigned_to', null);
+
+        if (search) {
+          const orSafe = search
+            .replace(/\\/g, '\\\\')
+            .replace(/%/g, '\\%')
+            .replace(/_/g, '\\_')
+            .replace(/[,()"]/g, ' ');
+          const clauses = [
+            `title.ilike.%${orSafe}%`,
+            `ticket_number.ilike.%${orSafe}%`,
+          ];
+          if (requesterIds.length) {
+            clauses.push(`created_by.in.(${requesterIds.join(',')})`);
+          }
+          q = q.or(clauses.join(','));
+        }
+        return q;
+      };
+
+      // Paginated mode: one page plus the real total from PostgREST.
+      if (page && pageSize) {
+        const start = (page - 1) * pageSize;
+        const { data, error, count } = await buildQuery().range(start, start + pageSize - 1);
+        if (error) throw error;
+        const tickets = (data ?? []).map(mapTicket);
+        return { data: tickets, total: count ?? tickets.length, page, limit: pageSize };
+      }
+
+      // Full-fetch mode (calendar, reports, pickers): page through in
+      // 1,000-row chunks — a single PostgREST response is silently capped
+      // at 1,000 rows, which used to truncate these lists without error.
+      const rows: any[] = [];
+      const CHUNK = 1000;
+      for (let start = 0; ; start += CHUNK) {
+        const { data, error } = await buildQuery().range(start, start + CHUNK - 1);
+        if (error) throw error;
+        rows.push(...(data ?? []));
+        if (!data || data.length < CHUNK) break;
+      }
+      const tickets = rows.map(mapTicket);
+      return { data: tickets, total: tickets.length, page: 1, limit: tickets.length };
+    },
+  });
+}
+
+export interface TicketSummaryCounts {
+  total: number;
+  open: number;
+  inProgress: number;
+  onHold: number;
+  /** Resolved now + closed-after-resolved (lifecycle count). */
+  resolved: number;
+  closed: number;
+  /** Closed tickets that passed through Resolved first. */
+  resolvedBeforeClosed: number;
+  /** De-duplicated union of resolved-lifecycle and closed. */
+  resolvedClosed: number;
+}
+
+/**
+ * Queue counts for the Tickets page summary strip, computed with exact
+ * head-count queries instead of downloading every matching ticket row.
+ */
+export function useGetTicketSummary(opts?: {
+  query?: Pick<TicketQueryFilters, 'assignedTo' | 'createdBy' | 'relatedTo' | 'unassigned'>;
+}) {
+  const query = opts?.query;
+  const assignedTo = query?.assignedTo;
+  const createdBy = query?.createdBy;
+  const relatedTo = query?.relatedTo;
+  const unassigned = query?.unassigned;
+  const { data: authed } = useHasSession();
+
+  return useQuery<TicketSummaryCounts>({
+    queryKey: ['ticketSummary', assignedTo, createdBy, relatedTo, unassigned],
     enabled: !!authed,
     queryFn: async () => {
-      let q = supabase.from('tickets').select(TICKET_SELECT).order('created_at', { ascending: false });
-      // Server-side filters (search is handled client-side — filtering on joined
-      // profile columns via .or() is unreliable in PostgREST with embedded selects)
-      if (status) q = q.eq('status', status);
-      if (priority) q = q.eq('priority', priority);
-      if (relatedTo) {
-        // Personal queue: tickets assigned to the user OR submitted by them.
-        q = q.or(`assigned_to.eq.${relatedTo},created_by.eq.${relatedTo}`);
-      } else {
-        if (createdBy) q = q.eq('created_by', createdBy);
-        if (assignedTo) q = q.eq('assigned_to', assignedTo);
-      }
-      const { data, error } = await q;
-      if (error) throw error;
-      let tickets = (data ?? []).map(mapTicket);
-      // Client-side search: title, id prefix, or requester name
-      if (search) {
-        const term = search.toLowerCase();
-        tickets = tickets.filter(t =>
-          t.title.toLowerCase().includes(term) ||
-          t.id.toLowerCase().startsWith(term) ||
-          (t as any).ticketNumber?.toLowerCase().includes(term) ||
-          t.createdBy.fullName.toLowerCase().includes(term)
-        );
-      }
-      return { data: tickets, total: tickets.length, page: 1, limit: 100 };
+      const applyScope = (q: any) => {
+        if (relatedTo) {
+          q = q.or(`assigned_to.eq.${relatedTo},created_by.eq.${relatedTo}`);
+        } else {
+          if (createdBy) q = q.eq('created_by', createdBy);
+          if (assignedTo) q = q.eq('assigned_to', assignedTo);
+        }
+        if (unassigned) q = q.is('assigned_to', null);
+        return q;
+      };
+      const countWith = async (extra?: (q: any) => any): Promise<number> => {
+        let q = supabase.from('tickets').select('id', { count: 'exact', head: true });
+        q = applyScope(q);
+        if (extra) q = extra(q);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count ?? 0;
+      };
+
+      const [total, open, inProgress, onHold, resolvedNow, closedAfterResolved, closed, resolvedUnion] =
+        await Promise.all([
+          countWith(),
+          countWith(q => q.eq('status', 'open')),
+          countWith(q => q.eq('status', 'in_progress')),
+          countWith(q => q.eq('status', 'on_hold')),
+          countWith(q => q.eq('status', 'resolved')),
+          countWith(q => q.eq('status', 'closed').not('resolved_at', 'is', null)),
+          countWith(q => q.eq('status', 'closed')),
+          countWith(q => q.in('status', ['resolved', 'closed'])),
+        ]);
+
+      return {
+        total,
+        open,
+        inProgress,
+        onHold,
+        resolved: resolvedNow + closedAfterResolved,
+        closed,
+        resolvedBeforeClosed: closedAfterResolved,
+        resolvedClosed: resolvedUnion,
+      };
     },
   });
 }
@@ -428,6 +606,7 @@ export function useCreateTicket() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ticketSummary'] });
       qc.invalidateQueries({ queryKey: ['dashboardStats'] });
     },
   });
@@ -484,6 +663,7 @@ export function useUpdateTicket() {
     },
     onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ticketSummary'] });
       qc.invalidateQueries({ queryKey: ['ticket', id] });
       qc.invalidateQueries({ queryKey: ['dashboardStats'] });
       qc.invalidateQueries({ queryKey: ['staffWorkload'] });
@@ -509,6 +689,7 @@ export function useAddTicketComment() {
     onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: ['ticket', id] });
       qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ticketSummary'] });
     },
   });
 }
@@ -637,86 +818,133 @@ export function useGetDashboardStats() {
       const role = user?.app_metadata?.role ?? 'general_user';
       const userId = user?.id;
 
-      // Ticket queries scoped by role
-      let ticketsQ = supabase.from('tickets').select('status, resolved_at');
+      // All dashboard numbers come from exact head-count queries — no
+      // ticket/asset rows are downloaded just to count them in memory, so
+      // the dashboard stays fast as the tables grow. Scoping by role
+      // matches what each role's cards show:
+      //  - administrator: organization-wide
+      //  - support_staff: tickets assigned to them OR submitted by them
+      //    (same union as the Tickets page), assets organization-wide
+      //  - general_user: only tickets they submitted
+      const applyTicketScope = (q: any) => {
+        if (role === 'support_staff' && userId) return q.or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
+        if (role === 'general_user' && userId) return q.eq('created_by', userId);
+        return q;
+      };
+      const countTickets = async (extra?: (q: any) => any): Promise<number> => {
+        let q = supabase.from('tickets').select('id', { count: 'exact', head: true });
+        q = applyTicketScope(q);
+        if (extra) q = extra(q);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count ?? 0;
+      };
+      // Unscoped ticket count (used for support's organization-wide open card).
+      const countAllTickets = async (extra?: (q: any) => any): Promise<number> => {
+        let q = supabase.from('tickets').select('id', { count: 'exact', head: true });
+        if (extra) q = extra(q);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count ?? 0;
+      };
+      const countAssets = async (extra?: (q: any) => any): Promise<number> => {
+        let q = supabase.from('assets').select('id', { count: 'exact', head: true });
+        if (extra) q = extra(q);
+        const { count, error } = await q;
+        if (error) throw error;
+        return count ?? 0;
+      };
+
       let recentQ = supabase.from('tickets').select(TICKET_SELECT)
         .order('last_activity_at', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(5);
+      recentQ = applyTicketScope(recentQ);
 
-      if (role === 'support_staff' && userId) {
-        // Support "My tickets" scope: assigned to them OR submitted by them
-        // (same union as the Tickets page grouping).
-        ticketsQ = ticketsQ.or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
-        recentQ = recentQ.or(`assigned_to.eq.${userId},created_by.eq.${userId}`);
-      } else if (role === 'general_user' && userId) {
-        ticketsQ = ticketsQ.eq('created_by', userId);
-        recentQ = recentQ.eq('created_by', userId);
-      }
-
-      const [ticketsRes, recentTicketsRes] = await Promise.all([ticketsQ, recentQ]);
-      if (ticketsRes.error) throw ticketsRes.error;
+      const [
+        totalTickets,
+        openTickets,
+        inProgressTickets,
+        resolvedNow,
+        closedAfterResolved,
+        closedTickets,
+        resolvedClosedTickets,
+        recentTicketsRes,
+      ] = await Promise.all([
+        countTickets(),
+        countTickets(q => q.eq('status', 'open')),
+        countTickets(q => q.eq('status', 'in_progress')),
+        countTickets(q => q.eq('status', 'resolved')),
+        countTickets(q => q.eq('status', 'closed').not('resolved_at', 'is', null)),
+        countTickets(q => q.eq('status', 'closed')),
+        countTickets(q => q.in('status', ['resolved', 'closed'])),
+        recentQ,
+      ]);
       if (recentTicketsRes.error) throw recentTicketsRes.error;
 
-      // Asset counts — admin and support staff get org-wide; support/general also get personal assigned count
-      let assets: any[] = [];
-      let userCount = 0;
-      let myAssignedAssets = 0;
+      // Lifecycle count: a ticket closed after being resolved counts as
+      // Resolved as well as Closed; resolvedClosedTickets is the
+      // de-duplicated union used by the combined card.
+      const resolvedTickets = resolvedNow + closedAfterResolved;
 
-      if (role === 'administrator' || role === 'support_staff') {
-        const [assetsRes, usersRes] = await Promise.all([
-          supabase.from('assets').select('status, assigned_to'),
-          supabase.from('profiles').select('id', { count: 'exact', head: true }),
-        ]);
-        if (assetsRes.error) throw assetsRes.error;
-        assets = assetsRes.data ?? [];
-        userCount = usersRes.count ?? 0;
-      }
-
-      // Personal assigned asset count for all non-admin roles (and admin too for "Assets Assigned to Me")
-      if (userId) {
-        const { count } = await supabase
-          .from('assets').select('id', { count: 'exact', head: true })
-          .eq('assigned_to', userId);
-        myAssignedAssets = count ?? 0;
-      }
-
-      const tickets = ticketsRes.data ?? [];
-
-      // Organization-wide open ticket count. Support staff's scoped ticket
-      // list above is their assigned-or-submitted union, but their dashboard
+      // Organization-wide open ticket count. Support staff's scoped counts
+      // above cover their assigned-or-submitted union, but their dashboard
       // "Open tickets" card covers the whole queue — and their RLS role can
       // already read every ticket, so count directly.
-      let allOpenTickets = tickets.filter((t: any) => t.status === 'open').length;
+      let allOpenTickets = openTickets;
       if (role === 'support_staff') {
-        const { count: openCount } = await supabase
-          .from('tickets')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'open');
-        if (openCount != null) allOpenTickets = openCount;
+        allOpenTickets = await countAllTickets(q => q.eq('status', 'open'));
+      }
+
+      // Asset counts — admin and support staff get org-wide; general users
+      // only get their personal assigned count below.
+      let totalAssets = 0;
+      let availableAssets = 0;
+      let assignedAssets = 0;
+      let inactiveAssets = 0;
+      let inMaintenanceAssets = 0;
+      let retiredAssets = 0;
+      let userCount = 0;
+      if (role === 'administrator' || role === 'support_staff') {
+        const [total, active, assigned, inactive, maintenance, retired, users] = await Promise.all([
+          countAssets(),
+          countAssets(q => q.eq('status', 'active')),
+          countAssets(q => q.not('assigned_to', 'is', null)),
+          countAssets(q => q.eq('status', 'inactive')),
+          countAssets(q => q.eq('status', 'maintenance')),
+          countAssets(q => q.eq('status', 'retired')),
+          supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        ]);
+        totalAssets = total;
+        availableAssets = active;
+        assignedAssets = assigned;
+        inactiveAssets = inactive;
+        inMaintenanceAssets = maintenance;
+        retiredAssets = retired;
+        if (users.error) throw users.error;
+        userCount = users.count ?? 0;
+      }
+
+      // Personal assigned asset count for all roles ("Assets Assigned to Me").
+      let myAssignedAssets = 0;
+      if (userId) {
+        myAssignedAssets = await countAssets(q => q.eq('assigned_to', userId));
       }
 
       return {
-        totalAssets: assets.length,
-        availableAssets: assets.filter((a: any) => a.status === 'active').length,
-        assignedAssets: assets.filter((a: any) => !!a.assigned_to).length,
-        inactiveAssets: assets.filter((a: any) => a.status === 'inactive').length,
-        inMaintenanceAssets: assets.filter((a: any) => a.status === 'maintenance').length,
-        retiredAssets: assets.filter((a: any) => a.status === 'retired').length,
-        openTickets: tickets.filter((t: any) => t.status === 'open').length,
-        inProgressTickets: tickets.filter((t: any) => t.status === 'in_progress').length,
-        // Lifecycle counts: a ticket closed after being resolved counts as
-        // Resolved as well as Closed; resolvedClosedTickets stays the
-        // de-duplicated union used by the combined card.
-        resolvedTickets: tickets.filter(
-          (t: any) => t.status === 'resolved' || (t.status === 'closed' && !!t.resolved_at)
-        ).length,
-        closedTickets: tickets.filter((t: any) => t.status === 'closed').length,
-        resolvedClosedTickets: tickets.filter(
-          (t: any) => t.status === 'resolved' || t.status === 'closed'
-        ).length,
-        totalTickets: tickets.length,
-        allTickets: tickets.length,  // alias used by admin "All Tickets" card
+        totalAssets,
+        availableAssets,
+        assignedAssets,
+        inactiveAssets,
+        inMaintenanceAssets,
+        retiredAssets,
+        openTickets,
+        inProgressTickets,
+        resolvedTickets,
+        closedTickets,
+        resolvedClosedTickets,
+        totalTickets,
+        allTickets: totalTickets,  // alias used by admin "All Tickets" card
         allOpenTickets,  // organization-wide open count (support "Open tickets" card)
         myAssignedAssets,
         totalUsers: userCount,
@@ -814,11 +1042,12 @@ export function useGetStaffWorkload() {
           .in('role', ['support_staff', 'administrator'])
           .eq('is_active', true)
           .order('full_name'),
-        supabase.from('tickets').select('assigned_to, status').in('status', ['open', 'in_progress', 'on_hold']),
+        fetchAllRows<any>(() =>
+          supabase.from('tickets').select('assigned_to, status').in('status', ['open', 'in_progress', 'on_hold']).order('id')
+        ),
       ]);
       if (staffRes.error) throw staffRes.error;
-      if (ticketsRes.error) throw ticketsRes.error;
-      const tickets = ticketsRes.data ?? [];
+      const tickets = ticketsRes;
       return (staffRes.data ?? [])
         .map((s: any) => {
           const mine = tickets.filter((t: any) => t.assigned_to === s.id);
@@ -892,20 +1121,22 @@ export function useGetTicketTrend(weeks = 8) {
       }
 
       const since = buckets[0].start;
-      const [openedRes, resolvedRes] = await Promise.all([
-        supabase.from('tickets').select('created_at').gte('created_at', since.toISOString()),
-        supabase.from('tickets').select('resolved_at').not('resolved_at', 'is', null).gte('resolved_at', since.toISOString()),
+      const [openedRows, resolvedRows] = await Promise.all([
+        fetchAllRows<{ created_at: string }>(() =>
+          supabase.from('tickets').select('created_at').gte('created_at', since.toISOString()).order('created_at').order('id')
+        ),
+        fetchAllRows<{ resolved_at: string | null }>(() =>
+          supabase.from('tickets').select('resolved_at').not('resolved_at', 'is', null).gte('resolved_at', since.toISOString()).order('resolved_at').order('id')
+        ),
       ]);
-      if (openedRes.error) throw openedRes.error;
-      if (resolvedRes.error) throw resolvedRes.error;
 
       return buckets.map(({ label, start, end }) => ({
         week: label,
-        opened: (openedRes.data ?? []).filter(t => {
+        opened: openedRows.filter(t => {
           const d = new Date(t.created_at);
           return d >= start && d <= end;
         }).length,
-        resolved: (resolvedRes.data ?? []).filter(t => {
+        resolved: resolvedRows.filter(t => {
           const d = new Date(t.resolved_at!);
           return d >= start && d <= end;
         }).length,
@@ -922,15 +1153,17 @@ export function useGetAssetHistoryAll(opts?: { from?: string; to?: string }) {
     queryKey: ['assetHistoryAll', opts?.from, opts?.to],
     enabled: !!authed,
     queryFn: async () => {
-      let q = supabase
-        .from('asset_history')
-        .select('*, changed_by_profile:profiles!asset_history_changed_by_fkey(id, full_name), asset:assets(id, asset_tag, name)')
-        .order('created_at', { ascending: true });
-      if (opts?.from) q = q.gte('created_at', opts.from);
-      if (opts?.to) q = q.lte('created_at', opts.to + 'T23:59:59');
-      const { data, error } = await q;
-      if (error) throw error;
-      return (data ?? []).map((h: any) => ({
+      const data = await fetchAllRows<any>(() => {
+        let q = supabase
+          .from('asset_history')
+          .select('*, changed_by_profile:profiles!asset_history_changed_by_fkey(id, full_name), asset:assets(id, asset_tag, name)')
+          .order('created_at', { ascending: true })
+          .order('id', { ascending: true });
+        if (opts?.from) q = q.gte('created_at', opts.from);
+        if (opts?.to) q = q.lte('created_at', opts.to + 'T23:59:59');
+        return q;
+      });
+      return data.map((h: any) => ({
         id: h.id,
         assetId: h.asset_id,
         assetTag: h.asset?.asset_tag ?? null,
@@ -952,17 +1185,12 @@ export function useGetUserActivity(opts?: { enabled?: boolean }) {
     queryKey: ['userActivity'],
     enabled: !!authed && (opts?.enabled ?? true),
     queryFn: async () => {
-      const [usersRes, assetsRes, ticketsRes] = await Promise.all([
+      const [usersRes, assets, tickets] = await Promise.all([
         supabase.from('profiles').select('*').order('full_name'),
-        supabase.from('assets').select('assigned_to'),
-        supabase.from('tickets').select('created_by, assigned_to, status'),
+        fetchAllRows<any>(() => supabase.from('assets').select('assigned_to').order('id')),
+        fetchAllRows<any>(() => supabase.from('tickets').select('created_by, assigned_to, status').order('id')),
       ]);
       if (usersRes.error) throw usersRes.error;
-      if (assetsRes.error) throw assetsRes.error;
-      if (ticketsRes.error) throw ticketsRes.error;
-
-      const assets = assetsRes.data ?? [];
-      const tickets = ticketsRes.data ?? [];
 
       return (usersRes.data ?? []).map((u: any) => ({
         id: u.id,
@@ -986,12 +1214,14 @@ export function useGetAllTicketsForReport(opts?: { enabled?: boolean }) {
     queryKey: ['allTicketsReport'],
     enabled: !!authed && (opts?.enabled ?? true),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('tickets')
-        .select(`*, created_by_profile:profiles!tickets_created_by_fkey(*), assigned_to_profile:profiles!tickets_assigned_to_fkey(*), asset:assets(id, asset_tag, name, category, status)`)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return (data ?? []).map(mapTicket);
+      const data = await fetchAllRows<any>(() =>
+        supabase
+          .from('tickets')
+          .select(`*, created_by_profile:profiles!tickets_created_by_fkey(*), assigned_to_profile:profiles!tickets_assigned_to_fkey(*), asset:assets(id, asset_tag, name, category, status)`)
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+      );
+      return data.map(mapTicket);
     },
   });
 }
