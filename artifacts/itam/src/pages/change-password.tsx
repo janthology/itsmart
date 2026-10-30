@@ -63,6 +63,10 @@ export default function ChangePassword() {
       toast({ variant: "destructive", title: "Choose a different password", description: "You cannot keep the default password." });
       return;
     }
+    if (next === current) {
+      toast({ variant: "destructive", title: "Choose a different password", description: "Your new password must be different from your current password." });
+      return;
+    }
 
     setLoading(true);
     try {

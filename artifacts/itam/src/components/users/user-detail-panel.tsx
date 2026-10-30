@@ -203,7 +203,7 @@ export function UserDetailPanel({
           <AlertDialogHeader>
             <AlertDialogTitle className="font-display">Reset password for {user.fullName}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Password will be set to <span className="font-mono font-semibold text-foreground">dostro2</span>.
+              A new secure temporary password will be generated and shown to you once.
               They must change it on next login.
             </AlertDialogDescription>
           </AlertDialogHeader>

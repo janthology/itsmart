@@ -48,7 +48,9 @@ export default function CalendarPage() {
   const [, setLocation] = useLocation();
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null);
+  // Default to today being selected/highlighted so the Day details panel
+  // opens on today's events instead of an empty prompt.
+  const [selectedDay, setSelectedDay] = useState<Date | null>(() => new Date());
 
   const ticketQuery: Record<string, string | undefined> = {};
   if (!isAdmin && !isSupport) ticketQuery.createdBy = user?.id;

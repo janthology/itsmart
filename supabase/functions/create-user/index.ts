@@ -7,6 +7,36 @@ const corsHeaders = {
 
 const VALID_ROLES = new Set(['general_user', 'support_staff', 'administrator'])
 
+// Generate a one-time temporary password instead of using a shared default
+// (the old "dostro2" was identical for every user and publicly known from
+// the UI copy). Each account gets a fresh 20-character password drawn from
+// a CSPRNG with at least one character per class, satisfying the app's
+// password rules. It is returned to the calling administrator exactly once
+// in this response; only its hash is ever stored (by GoTrue), and the
+// account is flagged must_change_password so it cannot be kept. Ambiguous
+// characters (0/O, 1/l/I) are excluded so it can be relayed verbally.
+function generateTemporaryPassword(length = 20): string {
+  const sets = [
+    'abcdefghijkmnpqrstuvwxyz', // lowercase, no l/o
+    'ABCDEFGHJKLMNPQRSTUVWXYZ', // uppercase, no I/O
+    '23456789', // digits, no 0/1
+    '!@#$%^&*()-_=+',
+  ]
+  const all = sets.join('')
+  const randBelow = (n: number) => {
+    const buf = new Uint32Array(1)
+    crypto.getRandomValues(buf)
+    return buf[0] % n
+  }
+  const chars = sets.map((s) => s[randBelow(s.length)])
+  while (chars.length < length) chars.push(all[randBelow(all.length)])
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randBelow(i + 1)
+    ;[chars[i], chars[j]] = [chars[j], chars[i]]
+  }
+  return chars.join('')
+}
+
 function jsonResponse(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -131,6 +161,8 @@ Deno.serve(async (req: Request) => {
         ? department.trim()
         : null
 
+    const temporaryPassword = generateTemporaryPassword()
+
     const createResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
       method: 'POST',
       headers: {
@@ -140,7 +172,7 @@ Deno.serve(async (req: Request) => {
       },
       body: JSON.stringify({
         email: normalizedEmail,
-        password: 'dostro2',
+        password: temporaryPassword,
         email_confirm: true,
         user_metadata: {
           full_name: normalizedName,
@@ -201,7 +233,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(500, { error: profileError })
     }
 
-    return jsonResponse(200, { success: true, userId: createdUser.id })
+    // The temporary password is returned only here, only to the verified
+    // administrator caller, and is never logged or stored in plaintext.
+    return jsonResponse(200, {
+      success: true,
+      userId: createdUser.id,
+      temporaryPassword,
+    })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
     return jsonResponse(500, { error: message })

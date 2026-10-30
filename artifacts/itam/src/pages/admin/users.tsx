@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Loader2, UserPlus, Users, X } from "lucide-react";
+import { Loader2, UserPlus, Users, X, KeyRound, Copy, Check } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
@@ -32,6 +32,13 @@ export default function UsersManagement() {
   const [roleFilter, setRoleFilter] = useState<UserRoleFilter>("all");
   const [page, setPage] = useState(1);
   const [resettingId, setResettingId] = useState<string | null>(null);
+  // One-time temporary password returned by create-user / reset-password.
+  // Shown exactly once in a dialog, then cleared from state — it is never
+  // persisted anywhere in the UI.
+  const [tempPasswordInfo, setTempPasswordInfo] = useState<
+    { name: string; password: string; action: "created" | "reset" } | null
+  >(null);
+  const [copiedTemp, setCopiedTemp] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
   const [addingUser, setAddingUser] = useState(false);
@@ -97,10 +104,13 @@ export default function UsersManagement() {
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Failed to create user");
-      toast({
-        title: "User created",
-        description: `${newUser.fullName} has been added. Default password is "dostro2".`,
-      });
+      // Show the one-time temporary password exactly once (falls back to a
+      // plain toast only if an older function version didn't return one).
+      if (result.temporaryPassword) {
+        setTempPasswordInfo({ name: newUser.fullName, password: result.temporaryPassword, action: "created" });
+      } else {
+        toast({ title: "User created", description: `${newUser.fullName} has been added.` });
+      }
       setAddUserOpen(false);
       setNewUser({ email: "", fullName: "", department: "", role: "general_user" });
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -125,22 +135,42 @@ export default function UsersManagement() {
         },
         body: JSON.stringify({ userId: id }),
       });
+      const result = await res.json().catch(() => ({ error: res.statusText }));
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }));
-        throw new Error(err.error || "Failed to reset password");
+        throw new Error(result.error || "Failed to reset password");
       }
-      // The reset-password Edge Function also flags must_change_password
-      // server-side with the service key, so no client-side profile write
-      // is needed (or wanted) here.
-      toast({
-        title: "Password reset",
-        description: 'Password reset to "dostro2". User will be prompted to change it on next login.',
-      });
+      // The reset-password Edge Function flags must_change_password and
+      // revokes the user's sessions server-side. It returns a fresh one-time
+      // temporary password, shown exactly once below.
+      const target = allUsers.find((u) => u.id === id);
+      if (result.temporaryPassword) {
+        setTempPasswordInfo({ name: target?.fullName ?? "User", password: result.temporaryPassword, action: "reset" });
+      } else {
+        toast({
+          title: "Password reset",
+          description: "The user will be prompted to change their password on next login.",
+        });
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Failed to reset password.";
       toast({ variant: "destructive", title: "Error", description: message });
     } finally {
       setResettingId(null);
+    }
+  };
+
+  const copyTempPassword = async () => {
+    if (!tempPasswordInfo) return;
+    try {
+      await navigator.clipboard.writeText(tempPasswordInfo.password);
+      setCopiedTemp(true);
+      setTimeout(() => setCopiedTemp(false), 2000);
+    } catch {
+      toast({
+        variant: "destructive",
+        title: "Copy failed",
+        description: "Please select and copy the password manually.",
+      });
     }
   };
 
@@ -185,9 +215,8 @@ export default function UsersManagement() {
                   <DialogTitle className="text-xl font-display">Add new user</DialogTitle>
                 </div>
                 <DialogDescription className="pl-[52px]">
-                  Create an account with the default password{" "}
-                  <span className="font-mono font-semibold text-foreground">dostro2</span>. The user will be prompted
-                  to change it on first login.
+                  A secure one-time temporary password will be generated and shown to you once.
+                  The user will be prompted to change it on first login.
                 </DialogDescription>
               </DialogHeader>
             </div>
@@ -249,6 +278,61 @@ export default function UsersManagement() {
                 </Button>
               </div>
             </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* One-time temporary password — shown exactly once, never stored */}
+        <Dialog
+          open={!!tempPasswordInfo}
+          onOpenChange={(open) => {
+            if (!open) {
+              setTempPasswordInfo(null);
+              setCopiedTemp(false);
+            }
+          }}
+        >
+          <DialogContent className="sm:max-w-[460px] rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 font-display">
+                <KeyRound className="h-5 w-5 text-primary" />
+                Temporary password
+              </DialogTitle>
+              <DialogDescription>
+                {tempPasswordInfo?.action === "reset"
+                  ? `The password for ${tempPasswordInfo?.name} has been reset.`
+                  : `${tempPasswordInfo?.name} has been added.`}{" "}
+                Give them this one-time temporary password — they will be required to change it
+                when they sign in.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3">
+              <code className="min-w-0 break-all font-mono text-sm font-semibold text-foreground">
+                {tempPasswordInfo?.password}
+              </code>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="shrink-0 rounded-lg"
+                onClick={copyTempPassword}
+              >
+                {copiedTemp ? <Check className="mr-1.5 h-3.5 w-3.5" /> : <Copy className="mr-1.5 h-3.5 w-3.5" />}
+                {copiedTemp ? "Copied" : "Copy"}
+              </Button>
+            </div>
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-800/50 dark:bg-amber-900/10 dark:text-amber-300">
+              This password is shown only once and is not stored anywhere. If you close this
+              dialog without copying it, reset the password again to generate a new one.
+            </p>
+            <Button
+              className="w-full rounded-xl"
+              onClick={() => {
+                setTempPasswordInfo(null);
+                setCopiedTemp(false);
+              }}
+            >
+              Done
+            </Button>
           </DialogContent>
         </Dialog>
 

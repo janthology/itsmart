@@ -220,7 +220,7 @@ export function UserRow({
                     <AlertDialogHeader>
                       <AlertDialogTitle className="font-display">Reset password for {user.fullName}?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        This sets their password to <span className="font-mono font-semibold text-foreground">dostro2</span>.
+                        A new secure temporary password will be generated and shown to you once.
                         They will be prompted to change it on next login.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
