@@ -683,6 +683,19 @@ export function useGetDashboardStats() {
 
       const tickets = ticketsRes.data ?? [];
 
+      // Organization-wide open ticket count. Support staff's scoped ticket
+      // list above is their assigned-or-submitted union, but their dashboard
+      // "Open tickets" card covers the whole queue — and their RLS role can
+      // already read every ticket, so count directly.
+      let allOpenTickets = tickets.filter((t: any) => t.status === 'open').length;
+      if (role === 'support_staff') {
+        const { count: openCount } = await supabase
+          .from('tickets')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'open');
+        if (openCount != null) allOpenTickets = openCount;
+      }
+
       return {
         totalAssets: assets.length,
         availableAssets: assets.filter((a: any) => a.status === 'active').length,
@@ -704,6 +717,7 @@ export function useGetDashboardStats() {
         ).length,
         totalTickets: tickets.length,
         allTickets: tickets.length,  // alias used by admin "All Tickets" card
+        allOpenTickets,  // organization-wide open count (support "Open tickets" card)
         myAssignedAssets,
         totalUsers: userCount,
         recentTickets: (recentTicketsRes.data ?? []).map(mapTicket),

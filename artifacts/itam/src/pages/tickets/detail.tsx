@@ -632,7 +632,12 @@ export default function TicketDetail() {
                 )}
               </div>
 
-              {ticket.status !== "closed" && (
+              {/* Reply box only for people who may comment on this ticket
+                  (staff, its creator, or its assignee) — matching the
+                  ticket_comments insert policy; everyone else with access
+                  gets a read-only view. */}
+              {ticket.status !== "closed" &&
+                (canManage || ticket.createdBy.id === user?.id || ticket.assignedTo?.id === user?.id) && (
                 <div className="rounded-2xl border border-primary/20 bg-gradient-to-br from-card to-primary/[0.02] shadow-sm p-5">
                   <p className="text-sm font-medium text-foreground mb-3">Add a reply</p>
                   <Textarea
@@ -791,7 +796,9 @@ export default function TicketDetail() {
                         </div>
                       )}
 
-                      {isAdmin && (
+                      {/* Type is editable by administrators and support staff
+                          (canManage); Priority above stays administrator-only. */}
+                      {canManage && (
                         <div>
                           <Label className="mb-1.5 block">Type</Label>
                           <Select

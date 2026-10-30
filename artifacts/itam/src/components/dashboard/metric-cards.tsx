@@ -213,10 +213,12 @@ export function buildDashboardMetrics(
         accent: "primary",
       },
       {
-        title: "Open",
-        value: stats.openTickets ?? 0,
+        // Organization-wide for support staff: the count and the linked
+        // Tickets view both cover every open ticket, not just their own.
+        title: "Open tickets",
+        value: stats.allOpenTickets ?? stats.openTickets ?? 0,
         icon: AlertCircle,
-        href: "/tickets?status=open&scope=mine",
+        href: "/tickets?status=open&scope=all",
         accent: "warning",
       },
       {
@@ -250,27 +252,49 @@ export function buildDashboardMetrics(
     ];
   }
 
+  // General users: their own tickets by status, plus their assets.
   return [
     {
-      title: "Open tickets",
+      title: "My tickets",
+      value: stats.totalTickets ?? 0,
+      icon: TicketIcon,
+      href: "/tickets?scope=mine",
+      accent: "primary",
+    },
+    {
+      title: "Open",
       value: stats.openTickets ?? 0,
       icon: AlertCircle,
       href: "/tickets?status=open&scope=mine",
       accent: "warning",
     },
     {
-      title: "Resolved & closed",
-      value: stats.resolvedClosedTickets ?? stats.resolvedTickets ?? 0,
+      title: "In progress",
+      value: stats.inProgressTickets ?? 0,
+      icon: Clock,
+      href: "/tickets?status=in_progress&scope=mine",
+      accent: "info",
+    },
+    {
+      title: "Resolved",
+      value: stats.resolvedTickets ?? 0,
       icon: CheckCircle2,
-      href: "/tickets?status=resolved_closed&scope=mine",
+      href: "/tickets?status=resolved&scope=mine",
       accent: "success",
+    },
+    {
+      title: "Closed",
+      value: stats.closedTickets ?? 0,
+      icon: Archive,
+      href: "/tickets?status=closed&scope=mine",
+      accent: "violet",
     },
     {
       title: "My assets",
       value: stats.myAssignedAssets ?? 0,
       icon: Monitor,
       href: "/assets?scope=mine",
-      accent: "primary",
+      accent: "violet",
     },
   ];
 }
