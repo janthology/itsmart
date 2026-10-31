@@ -28,10 +28,12 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
-# Coverage
+# Coverage and browser test output
 coverage
 *.lcov
 .nyc_output
+**/test-results/
+**/playwright-report/
 
 # Cache directories
 .cache

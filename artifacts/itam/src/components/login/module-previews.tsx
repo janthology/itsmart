@@ -367,29 +367,21 @@ export function ReportsPreview({ isActive }: { isActive: boolean }) {
             />
 
             {/* Live tip dot — crypto pulse */}
-            <motion.circle
-              r="3"
-              fill="rgb(167,243,208)"
-              cx={TIP_X}
-              cy={TIP_Y}
+            <motion.g
               animate={{
                 opacity: [0, 0, 1, 1, 0],
                 scale: [0, 0, 1, 1.2, 0],
-                cy: [TIP_Y, TIP_Y, TIP_Y, TIP_Y - 1, TIP_Y],
+                y: [0, 0, 0, -1, 0],
               }}
               transition={{
                 duration: cycleDuration,
                 times: [0, 0.6, 0.65, 0.8, 1],
                 repeat: Infinity,
               }}
-            />
-            <motion.circle
-              r="5"
-              fill="none"
-              stroke="rgb(52,211,153)"
-              strokeWidth="1"
-              cx={TIP_X}
-              cy={TIP_Y}
+            >
+              <circle data-testid="reports-preview-tip" r="3" fill="rgb(167,243,208)" cx={TIP_X} cy={TIP_Y} />
+            </motion.g>
+            <motion.g
               animate={{
                 opacity: [0, 0, 0.6, 0],
                 scale: [0.5, 0.5, 1.8, 2.2],
@@ -399,7 +391,9 @@ export function ReportsPreview({ isActive }: { isActive: boolean }) {
                 times: [0, 0.65, 0.78, 0.9],
                 repeat: Infinity,
               }}
-            />
+            >
+              <circle r="5" fill="none" stroke="rgb(52,211,153)" strokeWidth="1" cx={TIP_X} cy={TIP_Y} />
+            </motion.g>
           </svg>
         </div>
 

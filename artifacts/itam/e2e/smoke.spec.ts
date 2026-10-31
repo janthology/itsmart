@@ -8,6 +8,29 @@ test.describe("signed-out smoke", () => {
     await expect(page.locator('input[type="password"]')).toBeVisible();
   });
 
+  test("login Reports animation keeps valid SVG coordinates", async ({ page }) => {
+    const svgErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.type() === "error" && /<circle> attribute (?:cx|cy): Expected length/i.test(message.text())) {
+        svgErrors.push(message.text());
+      }
+    });
+    await page.goto("/login");
+    const tip = page.getByTestId("reports-preview-tip");
+    await expect(tip).toHaveAttribute("cy", "9");
+    // Cover at least one full animation cycle, including a module highlight change.
+    await page.waitForTimeout(6000);
+    await expect(tip).toHaveAttribute("cy", "9");
+    expect(svgErrors).toEqual([]);
+  });
+
+  test("manifest is served as JSON rather than a redirect", async ({ request }) => {
+    const response = await request.get("/manifest.webmanifest", { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toMatch(/(?:application\/manifest\+json|application\/json)/);
+    expect(await response.json()).toMatchObject({ short_name: "ITSMART", start_url: "/" });
+  });
+
   test("protected route redirects to login", async ({ page }) => {
     await page.goto("/tickets");
     await expect(page).toHaveURL(/\/login$/);
