@@ -31,6 +31,26 @@ test.describe("signed-out smoke", () => {
     expect(await response.json()).toMatchObject({ short_name: "ITSMART", start_url: "/" });
   });
 
+  test("manifest request includes same-origin preview authentication cookies", async ({ page, context }) => {
+    await context.addCookies([{ name: "preview_auth_test", value: "authorized", url: "http://127.0.0.1:4173" }]);
+    let cookieHeader = "";
+    await page.route("**/manifest.webmanifest", async (route) => {
+      cookieHeader = (await route.request().allHeaders())["cookie"] ?? "";
+      await route.fulfill({
+        status: 200,
+        contentType: "application/manifest+json",
+        body: JSON.stringify({ name: "ITSMART", start_url: "/" }),
+      });
+    });
+    await page.goto("/login");
+    await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("crossorigin", "use-credentials");
+    const cdp = await context.newCDPSession(page);
+    const manifest = await cdp.send("Page.getAppManifest");
+    expect(manifest.data).toContain("ITSMART");
+    expect(cookieHeader).toContain("preview_auth_test=authorized");
+    await cdp.detach();
+  });
+
   test("protected route redirects to login", async ({ page }) => {
     await page.goto("/tickets");
     await expect(page).toHaveURL(/\/login$/);

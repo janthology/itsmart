@@ -13,7 +13,8 @@
     <!-- Icons & install identity (DOST logo on the brand-blue tile) -->
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
+    <!-- Protected preview deployments need their existing authentication cookie. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
 
     <!-- Social / sharing preview -->
     <meta property="og:type" content="website" />
