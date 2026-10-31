@@ -47,8 +47,18 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
       <div className="print-area">
         <div style={{ display: "flex", justifyContent: "center", padding: 0, fontFamily: "Arial, sans-serif", background: "#fff" }}>
           <div style={{ border: "2px solid #355872", borderRadius: 0, padding: 20, width: 280, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-            <div style={{ width: "100%", background: "#355872", color: "#fff", textAlign: "center", padding: "8px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
-              DOST &middot; ITSMART — IT Asset
+            <div style={{ width: "100%", background: "#355872", color: "#fff", padding: "8px 12px", borderRadius: 8, display: "flex", alignItems: "center", gap: 9, boxSizing: "border-box" }}>
+              <span style={{ width: 30, height: 30, borderRadius: 6, background: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <img src="/dostlogo.png" alt="DOST" style={{ width: 23, height: 23, objectFit: "contain" }} />
+              </span>
+              <span style={{ lineHeight: 1.25, textAlign: "left" }}>
+                <span style={{ display: "block", fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+                  IT<span style={{ color: "#9fc3e2" }}>SMART</span> &middot; IT Asset
+                </span>
+                <span style={{ display: "block", fontSize: 7.5, fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase", color: "#c8dcea" }}>
+                  DOST &middot; Cagayan Valley
+                </span>
+              </span>
             </div>
             {qrDataUrl ? <img src={qrDataUrl} alt="" style={{ width: 140, height: 140 }} /> : null}
             <div style={{ fontSize: 22, fontWeight: 800, color: "#355872", letterSpacing: "0.05em", fontFamily: "monospace" }}>{assetTag}</div>
@@ -58,6 +68,11 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
               {category.charAt(0).toUpperCase() + category.slice(1)}
               {location ? <><br />{location}</> : null}
               {serialNumber ? <><br />S/N: {serialNumber}</> : null}
+            </div>
+            <div style={{ width: "100%", borderTop: "1px dashed #cbd5e1" }} />
+            <div style={{ fontSize: 7.5, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "#94a3b8", textAlign: "center", lineHeight: 1.5 }}>
+              Property of the Department of Science
+              and Technology &middot; Region II
             </div>
           </div>
         </div>
