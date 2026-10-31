@@ -18,9 +18,12 @@ import {
   CalendarDays,
   Lock,
   Mail,
+  CircleAlert,
+  TriangleAlert,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ModulePreview } from "@/components/login/module-previews";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email"),
@@ -95,10 +98,10 @@ function LoginModuleCard({
       className="login-module-card group relative flex h-full min-h-0 cursor-default flex-col overflow-hidden rounded-lg border border-white/[0.08] p-2.5 sm:p-3"
     >
       <div className={`absolute inset-0 bg-gradient-to-br ${mod.color}`} />
-      <motion.div
-        animate={{ opacity: isActive ? [0.3, 0.55, 0.3] : 0.12 }}
-        transition={{ duration: 2.5, repeat: Infinity, ease: "easeInOut" }}
-        className={`absolute -right-4 -top-4 h-16 w-16 rounded-full blur-2xl ${mod.glow}`}
+      {/* Static soft glow — no infinite pulsing (calmer, and kinder to
+          motion-sensitive users); only the highlight ring cycles. */}
+      <div
+        className={`absolute -right-4 -top-4 h-16 w-16 rounded-full blur-2xl transition-opacity duration-700 ${mod.glow} ${isActive ? "opacity-30" : "opacity-10"}`}
       />
       <motion.div
         animate={{ opacity: isActive ? 1 : 0 }}
@@ -113,7 +116,7 @@ function LoginModuleCard({
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-semibold text-white/95 leading-tight">{mod.title}</p>
-            <p className="text-[9px] text-white/40 leading-snug line-clamp-1">{mod.desc}</p>
+            <p className="text-[10px] text-white/60 leading-snug line-clamp-1">{mod.desc}</p>
           </div>
         </div>
         <div className="mt-1.5 min-h-0 flex-1">
@@ -124,39 +127,99 @@ function LoginModuleCard({
   );
 }
 
+const LAST_EMAIL_KEY = "itsmart-last-email";
+
+/** Turns a raw sign-in failure into a message the user can act on. */
+function describeLoginError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  if (/invalid login credentials/i.test(message)) {
+    return "Incorrect email or password. Check your credentials and try again.";
+  }
+  if (/account deactivated/i.test(message)) {
+    return "Your account has been deactivated. Please contact an administrator.";
+  }
+  if (/failed to fetch|network|fetch|timed out|timeout/i.test(message)) {
+    return "Can't reach the server. Check your internet connection and try again.";
+  }
+  if (/email not confirmed/i.test(message)) {
+    return "This account's email has not been confirmed. Please contact an administrator.";
+  }
+  return message || "Sign-in failed. Please try again.";
+}
+
 export default function Login() {
   const { login } = useAuth();
   const [isPending, setIsPending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [lineIndex, setLineIndex] = useState(0);
   const [activeModule, setActiveModule] = useState(0);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
 
   const form = useForm<z.infer<typeof loginSchema>>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: "", password: "" },
   });
 
+  // Prefill the last-used email (address only — never the password).
   useEffect(() => {
-    const timer = setInterval(() => setLineIndex((i) => (i + 1) % ROTATING_LINES.length), 4000);
+    try {
+      const saved = window.localStorage.getItem(LAST_EMAIL_KEY);
+      if (saved) form.setValue("email", saved);
+    } catch {
+      /* storage unavailable — no prefill */
+    }
+  }, [form]);
+
+  // Real connectivity status for the status pill.
+  useEffect(() => {
+    const update = () => setIsOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  // Gentle rotation, paused entirely for reduced-motion users.
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = setInterval(() => setLineIndex((i) => (i + 1) % ROTATING_LINES.length), 8000);
     return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setActiveModule((i) => (i + 1) % MODULES.length), 2800);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = setInterval(() => setActiveModule((i) => (i + 1) % MODULES.length), 4500);
     return () => clearInterval(timer);
   }, []);
+
+  // Editing either field after a failure clears the error message.
+  useEffect(() => {
+    const sub = form.watch(() => setFormError(null));
+    return () => sub.unsubscribe();
+  }, [form]);
 
   const onSubmit = async (values: z.infer<typeof loginSchema>) => {
     setIsPending(true);
+    setFormError(null);
     try {
+      try {
+        window.localStorage.setItem(LAST_EMAIL_KEY, values.email);
+      } catch {
+        /* storage unavailable — sign-in still proceeds */
+      }
       await login(values);
-    } catch {
+    } catch (err) {
+      setFormError(describeLoginError(err));
       setIsPending(false);
     }
   };
 
   return (
-    <div className="relative flex h-dvh max-h-dvh items-center justify-center overflow-hidden bg-[hsl(207_32%_10%)] p-2 sm:p-3">
+    <div className="relative flex h-dvh max-h-dvh items-center justify-center overflow-hidden bg-background p-2 sm:p-3">
       {/* Background */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
         <div
@@ -177,21 +240,17 @@ export default function Login() {
         initial={{ opacity: 0, y: 12, scale: 0.99 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.45 }}
-        className="relative z-10 flex h-full max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-white/10 shadow-[0_32px_80px_rgba(0,0,0,0.45)] lg:grid lg:grid-cols-5 lg:rounded-[1.5rem]"
-        style={{
-          background: "linear-gradient(160deg, rgba(255,255,255,0.09) 0%, rgba(255,255,255,0.03) 100%)",
-          backdropFilter: "blur(32px)",
-        }}
+        className="relative z-10 flex h-full max-h-[calc(100dvh-1rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_32px_80px_rgba(0,0,0,0.25)] lg:grid lg:grid-cols-5 lg:rounded-[1.5rem]"
       >
         <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-accent/50 to-transparent" />
 
-        {/* Mobile brand strip */}
-        <div className="flex shrink-0 items-center gap-2.5 border-b border-white/[0.08] px-4 py-3 lg:hidden">
+        {/* Mobile brand strip — always dark, matching the desktop brand panel */}
+        <div className="flex shrink-0 items-center gap-2.5 border-b border-white/[0.08] bg-[hsl(207_32%_10%)] px-4 py-3 lg:hidden">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
             <img src="/dostlogo.png" alt="DOST" className="h-6 w-6 object-contain" />
           </div>
           <div className="min-w-0">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/45">DOST Cagayan Valley</p>
+            <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/60">DOST Cagayan Valley</p>
             <h1 className="font-display text-xl font-bold text-white">
               IT<span className="text-accent">SMART</span>
             </h1>
@@ -216,14 +275,18 @@ export default function Login() {
             </div>
             <div className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-1">
               <span className="relative flex h-1.5 w-1.5">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
-                <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                {isOnline && (
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+                )}
+                <span className={`relative inline-flex h-1.5 w-1.5 rounded-full ${isOnline ? "bg-emerald-400" : "bg-amber-400"}`} />
               </span>
-              <span className="text-[10px] font-medium text-white/50">Online</span>
+              <span className="text-[10px] font-medium text-white/70">
+                {isOnline ? "Online" : "Offline"}
+              </span>
             </div>
           </div>
 
-          <div className="mt-3 h-9 shrink-0 overflow-hidden sm:mt-4 sm:h-10">
+          <div aria-hidden="true" className="mt-3 h-9 shrink-0 overflow-hidden sm:mt-4 sm:h-10">
             <AnimatePresence mode="wait">
               <motion.p
                 key={lineIndex}
@@ -256,8 +319,11 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Sign in */}
-        <div className="relative flex min-h-0 flex-1 flex-col justify-center overflow-hidden bg-gradient-to-b from-white/[0.05] to-white/[0.02] p-4 sm:p-5 lg:col-span-2 lg:border-l lg:border-white/[0.08] lg:p-6">
+        {/* Sign in — follows the light/dark theme */}
+        <div className="relative flex min-h-0 flex-1 flex-col justify-center overflow-hidden bg-card p-4 sm:p-5 lg:col-span-2 lg:border-l lg:border-border lg:p-6">
+          <div className="absolute right-4 top-4 z-10">
+            <ThemeToggle />
+          </div>
           <motion.div
             initial={{ opacity: 0, x: 12 }}
             animate={{ opacity: 1, x: 0 }}
@@ -265,19 +331,19 @@ export default function Login() {
             className="relative mx-auto w-full max-w-sm"
           >
             <div className="mb-3 sm:mb-4">
-              <div className="hidden items-center gap-1.5 rounded-full border border-white/10 bg-white/[0.05] px-2.5 py-0.5 lg:inline-flex">
-                <Lock className="h-3 w-3 text-accent/80" />
-                <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/45">
+              <div className="hidden items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-0.5 lg:inline-flex">
+                <Lock className="h-3 w-3 text-primary" />
+                <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                   Secure sign in
                 </span>
               </div>
-              <h2 className="font-display text-xl font-bold text-white lg:mt-3 sm:text-2xl">Welcome back</h2>
-              <p className="mt-1 text-xs text-white/45 sm:text-sm">
+              <h2 className="font-display text-xl font-bold text-foreground lg:mt-3 sm:text-2xl">Welcome back</h2>
+              <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
                 Sign in with your DOST Cagayan Valley credentials.
               </p>
             </div>
 
-            <div className="rounded-xl border border-white/[0.1] bg-white/[0.04] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:rounded-2xl sm:p-5">
+            <div className="rounded-xl border border-border bg-muted/30 p-4 sm:rounded-2xl sm:p-5">
               <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
                   <FormField
@@ -285,20 +351,22 @@ export default function Login() {
                     name="email"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-[11px] font-medium text-white/55">Email</FormLabel>
+                        <FormLabel className="text-[11px] font-medium text-muted-foreground">Email</FormLabel>
                         <FormControl>
                           <div className="group relative">
-                            <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30 group-focus-within:text-accent/80" />
+                            <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
                             <Input
                               type="email"
                               autoComplete="email"
+                              autoFocus
+                              disabled={isPending}
                               placeholder="you@dost.gov.ph"
                               {...field}
-                              className="h-10 rounded-lg border-white/[0.08] bg-white/[0.05] pl-9 text-sm text-white placeholder:text-white/25 focus-visible:border-accent/40 focus-visible:ring-accent/20"
+                              className="h-10 rounded-lg bg-background pl-9 text-sm placeholder:text-muted-foreground/60"
                             />
                           </div>
                         </FormControl>
-                        <FormMessage className="text-red-300 text-xs" />
+                        <FormMessage className="text-xs" />
                       </FormItem>
                     )}
                   />
@@ -308,31 +376,50 @@ export default function Login() {
                     name="password"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="text-[11px] font-medium text-white/55">Password</FormLabel>
+                        <FormLabel className="text-[11px] font-medium text-muted-foreground">Password</FormLabel>
                         <FormControl>
                           <div className="group relative">
-                            <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-white/30 group-focus-within:text-accent/80" />
+                            <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
                             <Input
                               type={showPassword ? "text" : "password"}
                               autoComplete="current-password"
+                              disabled={isPending}
                               placeholder="Enter your password"
                               {...field}
-                              className="h-10 rounded-lg border-white/[0.08] bg-white/[0.05] pl-9 pr-10 text-sm text-white placeholder:text-white/25 focus-visible:border-accent/40 focus-visible:ring-accent/20"
+                              onKeyDown={(e) => setCapsLockOn(e.getModifierState?.("CapsLock") ?? false)}
+                              onKeyUp={(e) => setCapsLockOn(e.getModifierState?.("CapsLock") ?? false)}
+                              className="h-10 rounded-lg bg-background pl-9 pr-10 text-sm placeholder:text-muted-foreground/60"
                             />
                             <button
                               type="button"
                               onClick={() => setShowPassword((v) => !v)}
+                              disabled={isPending}
                               aria-label={showPassword ? "Hide password" : "Show password"}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-white/35 hover:text-white/70"
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
                             >
                               {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                             </button>
                           </div>
                         </FormControl>
-                        <FormMessage className="text-red-300 text-xs" />
+                        {capsLockOn && (
+                          <p className="flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                            <TriangleAlert className="h-3 w-3" /> Caps Lock is on
+                          </p>
+                        )}
+                        <FormMessage className="text-xs" />
                       </FormItem>
                     )}
                   />
+
+                  {formError && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-xs leading-relaxed text-destructive"
+                    >
+                      <CircleAlert className="mt-px h-3.5 w-3.5 shrink-0" />
+                      <span>{formError}</span>
+                    </div>
+                  )}
 
                   <Button
                     type="submit"
@@ -355,7 +442,7 @@ export default function Login() {
               </Form>
             </div>
 
-            <p className="mt-3 text-center text-[10px] leading-relaxed text-white/35 sm:text-[11px]">
+            <p className="mt-3 text-center text-[11px] leading-relaxed text-muted-foreground">
               Need help? Contact your MIS Admin for password reset or access.
             </p>
           </motion.div>

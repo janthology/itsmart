@@ -154,7 +154,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async ({ email, password }: { email: string; password: string }) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      toast({ variant: "destructive", title: "Login failed", description: error.message });
+      // No toast here: the login page renders sign-in failures inline by
+      // the form (wrong credentials vs. connection problems), so toasting
+      // the same failure would double-report it.
       throw error;
     }
     // Check is_active and must_change_password BEFORE the auth state change
@@ -168,7 +170,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (profile && profile.is_active === false) {
           await supabase.auth.signOut();
           setIsLoading(false);
-          toast({ variant: "destructive", title: "Account deactivated", description: "Your account has been deactivated. Please contact an administrator." });
+          // Surfaced inline by the login page ('Account deactivated').
           throw new Error('Account deactivated');
         }
         if (profile?.must_change_password) {
