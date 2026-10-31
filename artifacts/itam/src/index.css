@@ -197,6 +197,26 @@
     @apply border-border;
   }
 
+  html {
+    /* Always reserve the scrollbar gutter. Without this, the layout
+       viewport grows/shrinks by the scrollbar width whenever the
+       scrollbar appears or disappears — switching between short and
+       long pages (e.g. My assets / All assets), or when a dialog, menu,
+       or popover locks page scroll — and the fixed header and centered
+       content visibly shift sideways. */
+    scrollbar-gutter: stable;
+  }
+
+  /* When Radix locks scroll (dialog/menu open), react-remove-scroll-bar
+     injects a margin-right on body equal to the scrollbar width as
+     compensation. With the gutter permanently reserved above, that
+     compensation would double-count and shift the content — cancel it.
+     (Selector is deliberately more specific than the injected rule.) */
+  html body[data-scroll-locked] {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground selection:bg-primary/20 selection:text-primary;
     /* Prevent any text from overflowing its container */
