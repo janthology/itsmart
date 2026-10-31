@@ -15,6 +15,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { Redirect } from "wouter";
 import { supabase } from "@/lib/supabase";
+import { logAdminAction } from "@/lib/audit";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import type { UserCardData } from "@/components/users/user-card";
 import { UserTeamPanel } from "@/components/users/user-team-panel";
@@ -65,6 +66,7 @@ export default function UsersManagement() {
   const handleRoleChange = async (id: string, newRole: UserRole) => {
     try {
       await updateMutation.mutateAsync({ id, data: { role: newRole } });
+      logAdminAction("user.role_changed", "user", id, { role: newRole });
       toast({ title: "Role updated", description: "User permissions changed." });
       if (id === user?.id) await refreshUser();
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -76,6 +78,7 @@ export default function UsersManagement() {
   const handleToggleActive = async (id: string, currentlyActive: boolean) => {
     try {
       await toggleActiveMutation.mutateAsync({ id, isActive: !currentlyActive });
+      logAdminAction(currentlyActive ? "user.deactivated" : "user.activated", "user", id);
       toast({
         title: currentlyActive ? "User deactivated" : "User activated",
         description: currentlyActive ? "User can no longer log in." : "User can now log in.",
@@ -111,6 +114,10 @@ export default function UsersManagement() {
       } else {
         toast({ title: "User created", description: `${newUser.fullName} has been added.` });
       }
+      logAdminAction("user.created", "user", result.user?.id ?? result.id ?? null, {
+        email: newUser.email,
+        role: newUser.role,
+      });
       setAddUserOpen(false);
       setNewUser({ email: "", fullName: "", department: "", role: "general_user" });
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -143,6 +150,7 @@ export default function UsersManagement() {
       // revokes the user's sessions server-side. It returns a fresh one-time
       // temporary password, shown exactly once below.
       const target = allUsers.find((u) => u.id === id);
+      logAdminAction("user.password_reset", "user", id);
       if (result.temporaryPassword) {
         setTempPasswordInfo({ name: target?.fullName ?? "User", password: result.temporaryPassword, action: "reset" });
       } else {
