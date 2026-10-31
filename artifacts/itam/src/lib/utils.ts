@@ -6,11 +6,13 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Escape a value for safe interpolation into an HTML string.
+ * Escape a value for safe interpolation into a raw HTML string.
  *
- * Required anywhere user-controlled data is written into markup outside
- * React's own rendering (notably window.document.write in the print
- * views) — React escapes text automatically, raw HTML strings do not.
+ * React escapes rendered text automatically, but anywhere markup is
+ * built as a string outside React, user-controlled values must be
+ * escaped with this first. (The print views moved to React rendering
+ * in Phase 5b; this remains for any future raw-HTML need and is
+ * covered by unit tests.)
  */
 export function escapeHtml(value: unknown): string {
   return String(value ?? "")

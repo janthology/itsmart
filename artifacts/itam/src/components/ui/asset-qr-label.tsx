@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QrCode, Printer } from "lucide-react";
-import { escapeHtml } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
 
 interface AssetQRLabelProps {
   assetTag: string;
@@ -14,7 +12,6 @@ interface AssetQRLabelProps {
 }
 
 export function AssetQRLabel({ assetTag, assetName, category, location, serialNumber }: AssetQRLabelProps) {
-  const { toast } = useToast();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>("");
 
@@ -38,87 +35,33 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
     return () => { cancelled = true; };
   }, [qrValue]);
 
+  // Popup-free print (Phase 5b): the label print view below renders in
+  // .print-area; CSS hides everything else when printing.
   const handlePrint = () => {
     if (!qrDataUrl) return;
-
-    const win = window.open("", "_blank", "width=400,height=500");
-    if (!win) {
-      toast({
-        variant: "destructive",
-        title: "Popup blocked",
-        description: "Allow popups for this site to print the label.",
-      });
-      return;
-    }
-
-    win.document.write(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Asset Label — ${escapeHtml(assetTag)}</title>
-        <style>
-          * { margin: 0; padding: 0; box-sizing: border-box; }
-          body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: flex-start; padding: 24px; background: #fff; }
-          .label {
-            border: 2px solid #355872;
-            border-radius: 12px;
-            padding: 20px;
-            width: 280px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-          }
-          .header {
-            width: 100%;
-            background: #355872;
-            color: white;
-            text-align: center;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-          }
-          .qr { width: 140px; height: 140px; }
-          .tag {
-            font-size: 22px;
-            font-weight: 800;
-            color: #355872;
-            letter-spacing: 0.05em;
-            font-family: monospace;
-          }
-          .name { font-size: 13px; font-weight: 600; color: #1e293b; text-align: center; }
-          .meta { font-size: 11px; color: #64748b; text-align: center; line-height: 1.6; }
-          .divider { width: 100%; border-top: 1px dashed #cbd5e1; }
-          @media print {
-            body { padding: 0; }
-            .label { border-radius: 0; border: 2px solid #355872; }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="label">
-          <div class="header">DOST · ITSMART — IT Asset</div>
-          <img class="qr" src="${qrDataUrl}" alt="QR Code" />
-          <div class="tag">${escapeHtml(assetTag)}</div>
-          <div class="divider"></div>
-          <div class="name">${escapeHtml(assetName)}</div>
-          <div class="meta">
-            ${escapeHtml(category.charAt(0).toUpperCase() + category.slice(1))}
-            ${location ? `<br/>${escapeHtml(location)}` : ""}
-            ${serialNumber ? `<br/>S/N: ${escapeHtml(serialNumber)}` : ""}
-          </div>
-        </div>
-        <script>window.onload = () => { window.print(); window.close(); }<\/script>
-      </body>
-      </html>
-    `);
-    win.document.close();
+    window.print();
   };
 
   return (
+    <>
+      <div className="print-area">
+        <div style={{ display: "flex", justifyContent: "center", padding: 0, fontFamily: "Arial, sans-serif", background: "#fff" }}>
+          <div style={{ border: "2px solid #355872", borderRadius: 0, padding: 20, width: 280, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <div style={{ width: "100%", background: "#355872", color: "#fff", textAlign: "center", padding: "8px 12px", borderRadius: 8, fontSize: 11, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+              DOST &middot; ITSMART — IT Asset
+            </div>
+            {qrDataUrl ? <img src={qrDataUrl} alt="" style={{ width: 140, height: 140 }} /> : null}
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#355872", letterSpacing: "0.05em", fontFamily: "monospace" }}>{assetTag}</div>
+            <div style={{ width: "100%", borderTop: "1px dashed #cbd5e1" }} />
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#1e293b", textAlign: "center" }}>{assetName}</div>
+            <div style={{ fontSize: 11, color: "#64748b", textAlign: "center", lineHeight: 1.6 }}>
+              {category.charAt(0).toUpperCase() + category.slice(1)}
+              {location ? <><br />{location}</> : null}
+              {serialNumber ? <><br />S/N: {serialNumber}</> : null}
+            </div>
+          </div>
+        </div>
+      </div>
     <Card className="border-border/50 shadow-lg shadow-black/5 rounded-2xl">
       <CardHeader className="border-b border-border/50 py-4 px-6">
         <CardTitle className="text-base font-display flex items-center gap-2">
@@ -147,6 +90,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
         </Button>
       </CardContent>
     </Card>
+    </>
   );
 }
 

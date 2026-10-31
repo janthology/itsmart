@@ -362,3 +362,31 @@
 .login-module-card:hover .module-shimmer {
   animation: card-shimmer 0.75s ease-in-out;
 }
+
+/* ─── Print (Phase 5b) ───
+   Popup-free printing: print views render in-page inside .print-area
+   (hidden on screen). When printing, everything else is hidden and only
+   the print view shows. React escapes all interpolated values, replacing
+   the old window.open + document.write documents. */
+.print-area {
+  display: none;
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print-area,
+  .print-area * {
+    visibility: visible;
+  }
+  .print-area {
+    display: block;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}
