@@ -220,63 +220,65 @@ export default function UsersManagement() {
                 </DialogDescription>
               </DialogHeader>
             </div>
-            <div className="p-6 space-y-4">
-              <div className="space-y-1.5">
-                <Label>Full name</Label>
-                <Input
-                  placeholder="e.g. Juan dela Cruz"
-                  value={newUser.fullName}
-                  onChange={(e) => setNewUser((p) => ({ ...p, fullName: e.target.value }))}
-                  className="rounded-xl h-10"
-                />
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Full name</Label>
+                  <Input
+                    placeholder="e.g. Juan dela Cruz"
+                    value={newUser.fullName}
+                    onChange={(e) => setNewUser((p) => ({ ...p, fullName: e.target.value }))}
+                    className="rounded-xl h-10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Email address</Label>
+                  <Input
+                    type="email"
+                    placeholder="name@dost.gov.ph"
+                    value={newUser.email}
+                    onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
+                    className="rounded-xl h-10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Department (optional)</Label>
+                  <Input
+                    placeholder="e.g. MIS"
+                    value={newUser.department}
+                    onChange={(e) => setNewUser((p) => ({ ...p, department: e.target.value }))}
+                    className="rounded-xl h-10"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Role</Label>
+                  <Select value={newUser.role} onValueChange={(v) => setNewUser((p) => ({ ...p, role: v }))}>
+                    <SelectTrigger className="rounded-xl h-10">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Object.values(UserRole).map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {roleLabel(r)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Email address</Label>
-                <Input
-                  type="email"
-                  placeholder="name@dost.gov.ph"
-                  value={newUser.email}
-                  onChange={(e) => setNewUser((p) => ({ ...p, email: e.target.value }))}
-                  className="rounded-xl h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Department (optional)</Label>
-                <Input
-                  placeholder="e.g. MIS"
-                  value={newUser.department}
-                  onChange={(e) => setNewUser((p) => ({ ...p, department: e.target.value }))}
-                  className="rounded-xl h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Role</Label>
-                <Select value={newUser.role} onValueChange={(v) => setNewUser((p) => ({ ...p, role: v }))}>
-                  <SelectTrigger className="rounded-xl h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.values(UserRole).map((r) => (
-                      <SelectItem key={r} value={r}>
-                        {roleLabel(r)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex gap-3 pt-2 border-t border-border/50">
-                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setAddUserOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  className="flex-1 rounded-xl"
-                  disabled={addingUser || !newUser.email || !newUser.fullName}
-                  onClick={handleAddUser}
-                >
-                  {addingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserPlus className="w-4 h-4 mr-2" />}
-                  Create user
-                </Button>
-              </div>
+            </div>
+            <div className="flex shrink-0 gap-3 border-t border-border/50 px-6 py-4">
+              <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setAddUserOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 rounded-xl"
+                disabled={addingUser || !newUser.email || !newUser.fullName}
+                onClick={handleAddUser}
+              >
+                {addingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserPlus className="w-4 h-4 mr-2" />}
+                Create user
+              </Button>
             </div>
           </DialogContent>
         </Dialog>

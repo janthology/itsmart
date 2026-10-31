@@ -463,9 +463,9 @@ export default function TicketsList() {
                       </DialogDescription>
                     </DialogHeader>
                   </div>
-                  <div className="p-6 max-h-[70vh] overflow-y-auto">
-                    <Form {...form}>
-                      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+                  <Form {...form}>
+                    <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
+                      <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
                         <FormField control={form.control} name="title" render={({ field }) => (
                           <FormItem><FormLabel>Summary</FormLabel><FormControl><Input placeholder="Brief title of the issue" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                         )} />
@@ -547,9 +547,10 @@ export default function TicketsList() {
                           )} />
                         </div>
                         <FormField control={form.control} name="description" render={({ field }) => (
-                          <FormItem><FormLabel>Description</FormLabel><FormControl><Textarea placeholder="Detailed explanation..." {...field} className="rounded-xl min-h-[120px]" /></FormControl><FormMessage /></FormItem>
+                          <FormItem><FormLabel>Description</FormLabel><FormControl><Textarea placeholder="Detailed explanation..." {...field} rows={4} className="rounded-xl min-h-[96px]" /></FormControl><FormMessage /></FormItem>
                         )} />
-                        <div className="pt-4 flex justify-end gap-3 border-t border-border/50">
+                      </div>
+                      <div className="flex shrink-0 justify-end gap-3 border-t border-border/50 px-6 py-4">
                           <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="rounded-xl">Cancel</Button>
                           {createSuccess ? (
                             <Button disabled className="rounded-xl bg-emerald-600 text-white gap-2">
@@ -562,9 +563,8 @@ export default function TicketsList() {
                             </Button>
                           )}
                         </div>
-                      </form>
-                    </Form>
-                  </div>
+                    </form>
+                  </Form>
                 </DialogContent>
               </Dialog>
           </div>
