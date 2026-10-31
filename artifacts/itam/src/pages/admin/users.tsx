@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useGetUsers, useUpdateUser, useToggleUserActive, UserRole } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
+import { PageHeader } from "@/components/layout/page-header";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -181,13 +182,11 @@ export default function UsersManagement() {
     <AppLayout>
       <div className="space-y-5">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="app-page-eyebrow">Administration</p>
-            <h1 className="app-page-title mt-1">
-              User <span className="text-primary">management</span>
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+        <PageHeader
+          eyebrow="Administration"
+          title={<>User <span className="text-primary">management</span></>}
+          subtitle={
+            <>
               Manage accounts, roles, and access across the organization
               {!isLoading && (
                 <span className="font-medium text-foreground">
@@ -195,17 +194,18 @@ export default function UsersManagement() {
                   · {allUsers.length} user{allUsers.length === 1 ? "" : "s"}
                 </span>
               )}
-            </p>
-          </div>
+            </>
+          }
+        >
           <Button className="h-10 shrink-0 rounded-xl shadow-sm" onClick={() => setAddUserOpen(true)}>
             <UserPlus className="w-4 h-4 mr-1.5" /> Add user
           </Button>
-        </div>
+        </PageHeader>
 
         {/* Add user dialog */}
         <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
-          <DialogContent className="sm:max-w-[460px] rounded-2xl border-0 shadow-2xl p-0 overflow-hidden">
-            <div className="relative px-6 py-6 border-b border-border overflow-hidden">
+          <DialogContent className="sm:max-w-[560px] rounded-2xl border-0 shadow-2xl p-0 gap-0 overflow-hidden flex max-h-[94vh] flex-col">
+            <div className="relative shrink-0 px-6 py-4 border-b border-border overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.08] via-transparent to-accent/[0.06]" />
               <DialogHeader className="relative">
                 <div className="flex items-center gap-3 mb-1">

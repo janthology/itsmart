@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { NotificationsBell } from "@/components/ui/notifications-bell";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import { BrandLockup } from "@/components/layout/brand-lockup";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
@@ -74,16 +75,8 @@ export const FloatingNav = memo(function FloatingNav() {
           )}
         >
           {/* Brand */}
-          <Link href="/dashboard" className="flex items-center gap-2.5 shrink-0 group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-[hsl(207_38%_28%)] shadow-md shadow-primary/20 ring-1 ring-white/20">
-              <img src="/dostlogo.png" alt="DOST" className="h-5 w-5 object-contain" />
-            </div>
-            <div className="hidden sm:block leading-none">
-              <p className="font-display text-sm font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
-                ITSMART
-              </p>
-              <p className="text-[10px] text-muted-foreground">Asset & Support</p>
-            </div>
+          <Link href="/dashboard" className="shrink-0 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-primary/30" aria-label="ITSMART home">
+            <BrandLockup size="md" />
           </Link>
 
           {/* Center pill nav — desktop */}

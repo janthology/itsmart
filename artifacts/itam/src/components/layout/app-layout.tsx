@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import { FloatingNav } from "./floating-nav";
 import { AmbientBackground } from "./ambient-background";
+import { BrandLockup } from "./brand-lockup";
 import { useAuth } from "@/lib/auth-context";
 import { Redirect } from "wouter";
 import { Loader2 } from "lucide-react";
@@ -13,7 +14,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <AmbientBackground />
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-5">
+          <BrandLockup size="lg" />
           <div className="gooey-loader" />
           <p className="text-sm text-muted-foreground font-medium">Loading ITSMART...</p>
         </div>

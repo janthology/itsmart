@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useGetAssets, useGetTickets } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
+import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -240,35 +241,17 @@ export default function CalendarPage() {
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Page hero */}
-        <div className="relative overflow-hidden rounded-2xl border border-primary/15 bg-gradient-to-br from-primary/[0.06] via-card to-accent/[0.05] px-6 py-5 md:px-7 md:py-6 shadow-sm">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-start gap-4 min-w-0">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/[0.1] text-primary ring-1 ring-primary/15">
-                <CalendarDays className="h-6 w-6" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-xl md:text-2xl font-display font-bold text-foreground tracking-tight">
-                  Calendar
-                </h1>
-                <p className="text-sm text-muted-foreground mt-0.5 max-w-xl leading-relaxed">
-                  {subtitle}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {isLoading ? (
-                <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Loading events
-                </span>
-              ) : (
-                <Badge variant="secondary" className="rounded-lg text-xs font-normal tabular-nums">
-                  {monthEvents.length} event{monthEvents.length === 1 ? "" : "s"} this month
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
+        <PageHeader eyebrow="Schedule" title="Calendar" subtitle={subtitle}>
+          {isLoading ? (
+            <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading events
+            </span>
+          ) : (
+            <Badge variant="secondary" className="rounded-lg text-xs font-normal tabular-nums">
+              {monthEvents.length} event{monthEvents.length === 1 ? "" : "s"} this month
+            </Badge>
+          )}
+        </PageHeader>
 
         {/* Event type filters */}
         <CalendarLegend legend={legend} activeFilters={activeFilters} onToggle={toggleFilter} />

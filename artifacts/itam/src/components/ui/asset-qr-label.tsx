@@ -100,7 +100,7 @@ export function AssetQRLabel({ assetTag, assetName, category, location, serialNu
       </head>
       <body>
         <div class="label">
-          <div class="header">DOST — IT Asset</div>
+          <div class="header">DOST · ITSMART — IT Asset</div>
           <img class="qr" src="${qrDataUrl}" alt="QR Code" />
           <div class="tag">${escapeHtml(assetTag)}</div>
           <div class="divider"></div>

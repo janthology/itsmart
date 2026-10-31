@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { useGetTickets, useGetTicketSummary, useCreateTicket, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets, type TicketQueryFilters } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
+import { PageHeader } from "@/components/layout/page-header";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -405,13 +406,11 @@ export default function TicketsList() {
     <AppLayout>
       <div className="space-y-5">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="app-page-eyebrow">IT Service Desk</p>
-            <h1 className="app-page-title mt-1">
-              Support <span className="text-primary">tickets</span>
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+        <PageHeader
+          eyebrow="IT Service Desk"
+          title={<>Support <span className="text-primary">tickets</span></>}
+          subtitle={
+            <>
               {scopeLabel}
               {!isLoading && (
                 <span className="font-medium text-foreground">
@@ -419,10 +418,9 @@ export default function TicketsList() {
                   · {headerTicketCount} ticket{headerTicketCount === 1 ? "" : "s"}
                 </span>
               )}
-            </p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
+            </>
+          }
+        >
             <div className="flex rounded-2xl border border-border/50 bg-card/70 p-1 shadow-sm backdrop-blur-sm">
               <button
                 type="button"
@@ -448,8 +446,8 @@ export default function TicketsList() {
                     <Plus className="w-4 h-4 mr-1.5" /> New ticket
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="sm:max-w-[550px] p-0 border-0 shadow-2xl rounded-2xl overflow-hidden">
-                  <div className="relative px-6 py-6 border-b border-border overflow-hidden">
+                <DialogContent className="sm:max-w-[620px] p-0 gap-0 border-0 shadow-2xl rounded-2xl overflow-hidden flex max-h-[94vh] flex-col">
+                  <div className="relative shrink-0 px-6 py-4 border-b border-border overflow-hidden">
                     <div className="absolute inset-0 bg-gradient-to-br from-primary/[0.08] via-transparent to-accent/[0.06]" />
                     <DialogHeader className="relative">
                       <div className="flex items-center gap-3 mb-1">
@@ -567,8 +565,7 @@ export default function TicketsList() {
                   </Form>
                 </DialogContent>
               </Dialog>
-          </div>
-        </div>
+        </PageHeader>
 
         {/* Split layout: queue sidebar + ticket list */}
         <div className="grid gap-5 lg:grid-cols-[minmax(240px,280px)_1fr] lg:items-start">

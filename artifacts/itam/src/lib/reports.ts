@@ -15,6 +15,27 @@ async function loadPdf() {
   return { jsPDF, autoTable };
 }
 
+/**
+ * Stamps every page of a report PDF with the brand identity: a small
+ * "DOST Cagayan Valley · ITSMART" header and a footer with the generated
+ * timestamp and page numbers, so exported documents are attributable
+ * and look official when printed or shared.
+ */
+function finalizePdf(doc: any) {
+  const pageCount = doc.getNumberOfPages();
+  const generatedAt = format(new Date(), "MMMM d, yyyy h:mm a");
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    doc.setFontSize(7.5);
+    doc.setTextColor(120);
+    doc.text("DOST Cagayan Valley · ITSMART", pageWidth - 14, 9, { align: "right" });
+    doc.text(`Generated ${generatedAt}`, 14, pageHeight - 8);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - 14, pageHeight - 8, { align: "right" });
+  }
+}
+
 // ─── Assets ──────────────────────────────────────────────────────────────────
 
 export async function exportAssetsXlsx(assets: any[]) {
@@ -78,6 +99,7 @@ export async function exportAssetsPdf(assets: any[], filters: { status?: string;
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
 
+  finalizePdf(doc);
   doc.save(`assets-report-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -143,6 +165,7 @@ export async function exportTicketsPdf(tickets: any[], filters: { status?: strin
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
 
+  finalizePdf(doc);
   doc.save(`tickets-report-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -194,6 +217,7 @@ export async function exportAssetHistoryPdf(history: any[], filters: { from?: st
     headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
+  finalizePdf(doc);
   doc.save(`asset-history-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -273,6 +297,7 @@ export async function exportTicketPerformancePdf(tickets: any[], filters: { from
       }
     },
   });
+  finalizePdf(doc);
   doc.save(`ticket-performance-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -322,6 +347,7 @@ export async function exportUserActivityPdf(users: any[]) {
     headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
+  finalizePdf(doc);
   doc.save(`user-activity-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -368,6 +394,7 @@ export async function exportUnassignedAssetsPdf(assets: any[]) {
     headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
+  finalizePdf(doc);
   doc.save(`unassigned-assets-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -441,6 +468,7 @@ export async function exportDepreciationPdf(assets: any[]) {
     headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
+  finalizePdf(doc);
   doc.save(`asset-depreciation-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 
@@ -493,6 +521,7 @@ export async function exportSatisfactionPdf(tickets: any[]) {
     headStyles: { fillColor: [53, 88, 114], textColor: 255, fontStyle: "bold" },
     alternateRowStyles: { fillColor: [245, 247, 250] },
   });
+  finalizePdf(doc);
   doc.save(`satisfaction-report-${format(new Date(), "yyyyMMdd")}.pdf`);
 }
 

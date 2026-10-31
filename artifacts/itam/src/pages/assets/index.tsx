@@ -3,6 +3,7 @@ import { useSearch } from "wouter";
 import { useGetAssets, useCreateAsset, useAddAssetHistory, AssetCategory, AssetStatus, generateNextAssetTag } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
+import { PageHeader } from "@/components/layout/page-header";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -172,20 +173,18 @@ export default function AssetsList() {
     <AppLayout>
       <div className="space-y-5">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="app-page-eyebrow">IT Asset Management</p>
-            <h1 className="app-page-title mt-1">
-              Asset <span className="text-primary">fleet</span>
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+        <PageHeader
+          eyebrow="IT Asset Management"
+          title={<>Asset <span className="text-primary">fleet</span></>}
+          subtitle={
+            <>
               {scope === "mine" ? "Equipment assigned to you" : "Organization-wide registry"}
               {!isLoading && (
                 <span className="font-medium text-foreground"> · {allAssets.length} device{allAssets.length === 1 ? "" : "s"}</span>
               )}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
+            </>
+          }
+        >
             <div className="flex rounded-2xl border border-border/50 bg-card/70 p-1 shadow-sm backdrop-blur-sm">
               <button
                 type="button"
@@ -311,8 +310,7 @@ export default function AssetsList() {
                   </DialogContent>
                 </Dialog>
               )}
-          </div>
-        </div>
+        </PageHeader>
 
         {/* Split layout: fleet sidebar + inventory */}
         <div className="grid gap-5 lg:grid-cols-[minmax(240px,280px)_1fr] lg:items-start">
