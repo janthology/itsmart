@@ -246,29 +246,29 @@ export default function Login() {
 
         {/* Mobile brand strip — always dark, matching the desktop brand panel */}
         <div className="flex shrink-0 items-center gap-2.5 border-b border-white/[0.08] bg-[hsl(207_32%_10%)] px-4 py-3 lg:hidden">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-            <img src="/dostlogo.png" alt="DOST" className="h-6 w-6 object-contain" />
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15">
+            <img src="/dostlogo.png" alt="DOST" className="h-8 w-8 object-contain" />
           </div>
           <div className="min-w-0">
-            <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-white/60">DOST Cagayan Valley</p>
-            <h1 className="font-display text-xl font-bold text-white">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/70">DOST Cagayan Valley</p>
+            <h1 className="font-display text-2xl font-bold text-white">
               IT<span className="text-accent">SMART</span>
             </h1>
           </div>
         </div>
 
-        {/* Left: brand + modules (desktop) */}
-        <div className="hidden min-h-0 flex-col overflow-hidden lg:flex lg:col-span-3 p-4 sm:p-5 lg:p-6">
+        {/* Left: brand + modules (desktop) — stays dark in both themes by design */}
+        <div className="hidden min-h-0 flex-col overflow-hidden bg-[hsl(207_32%_10%)] lg:flex lg:col-span-3 p-4 sm:p-5 lg:p-6">
           <div className="flex shrink-0 items-center justify-between gap-3">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15 sm:h-11 sm:w-11">
-                <img src="/dostlogo.png" alt="DOST" className="h-7 w-7 object-contain sm:h-8 sm:w-8" />
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/10 ring-1 ring-white/15 sm:h-14 sm:w-14">
+                <img src="/dostlogo.png" alt="DOST" className="h-9 w-9 object-contain sm:h-11 sm:w-11" />
               </div>
               <div className="min-w-0">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-white/45 sm:text-[10px]">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/70 sm:text-[11px]">
                   DOST Cagayan Valley
                 </p>
-                <h1 className="font-display text-2xl font-bold tracking-tight text-white sm:text-3xl">
+                <h1 className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">
                   IT<span className="text-accent">SMART</span>
                 </h1>
               </div>
@@ -307,7 +307,7 @@ export default function Login() {
             ))}
           </div>
 
-          <div className="mt-2 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-white/30">
+          <div className="mt-2 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-white/55">
             <span className="flex items-center gap-1">
               <ShieldCheck className="h-3 w-3" />
               Authorized personnel only
