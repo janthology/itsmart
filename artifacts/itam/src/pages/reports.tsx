@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { TICKET_STATUS_LABEL as STATUS_LABEL, TICKET_PRIORITY_LABEL as PRIORITY_LABEL } from "@/lib/labels";
 import {
   useGetAssets, useGetTickets, useGetAssetHistoryAll, useGetUserActivity, useGetAllTicketsForReport,
   AssetStatus, TicketStatus, TicketPriority,
@@ -32,12 +33,6 @@ import { ReportNav, type ReportDef, type ReportId, GROUP_LABELS } from "@/compon
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<string, string> = {
-  open: "Open", in_progress: "In Progress", on_hold: "On Hold", resolved: "Resolved", closed: "Closed",
-};
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: "Critical - 1", high: "High - 2", medium: "Medium - 3", low: "Low - 4",
-};
 
 function applyDateFilter<T extends { createdAt: string }>(items: T[], from: string, to: string): T[] {
   if (!from && !to) return items;

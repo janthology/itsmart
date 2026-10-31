@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, memo } from "react";
+import { TICKET_STATUS_LABEL as STATUS_LABEL, TICKET_PRIORITY_LABEL as PRIORITY_LABEL } from "@/lib/labels";
 import { useSearch } from "wouter";
 import { useGetTickets, useGetTicketSummary, useCreateTicket, useGetUsers, TicketPriority, TicketType, TICKET_TYPE_LABEL, useGetAssets, type TicketQueryFilters } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
@@ -26,19 +27,12 @@ import {
   applyTicketFilter,
 } from "@/components/tickets/ticket-summary-strip";
 import { TicketInventoryList } from "@/components/tickets/ticket-inventory-list";
+import { ListSkeleton, EmptyState, ErrorState } from "@/components/ui/page-states";
 import { TicketToolbar } from "@/components/tickets/ticket-toolbar";
 import type { TicketCardData } from "@/components/tickets/ticket-card";
 
 const PAGE_SIZE = 25;
 
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: 'Critical - 1', high: 'High - 2', medium: 'Medium - 3', low: 'Low - 4',
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  open: 'Open', in_progress: 'In Progress', on_hold: 'On Hold',
-  resolved: 'Resolved', closed: 'Closed',
-};
 
 const createTicketSchema = z.object({
   title: z.string().trim().min(1, "Title is required"),
@@ -291,7 +285,7 @@ export default function TicketsList() {
 
   // Main list: one server page at a time (skipped entirely in the grouped
   // personal view, whose sections run their own paged queries).
-  const { data, isLoading } = useGetTickets({
+  const { data, isLoading, error: ticketsError, refetch: refetchTickets } = useGetTickets({
     query: { ...queryFilters, page, pageSize: PAGE_SIZE },
     enabled: !showPersonalTicketGroups,
   });
@@ -590,47 +584,46 @@ export default function TicketsList() {
             />
 
             {isLoading ? (
-              <div className="space-y-2 rounded-3xl border border-border/60 bg-card/60 p-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="h-[72px] rounded-xl bg-muted/40 animate-pulse" />
-                ))}
-              </div>
+              <ListSkeleton />
+            ) : ticketsError && !data && !showPersonalTicketGroups ? (
+              <ErrorState
+                title="Couldn't load tickets"
+                message="The ticket list couldn't be loaded. Check your connection and try again."
+                onRetry={() => refetchTickets()}
+              />
             ) : !showPersonalTicketGroups && !listTickets.length ? (
-              <div className="flex flex-col items-center justify-center rounded-3xl border border-border/50 bg-card/75 p-16 text-center shadow-sm">
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/[0.08] ring-1 ring-primary/15">
-                  <TicketIcon className="h-8 w-8 text-primary/60" />
-                </div>
-                <h3 className="mb-1.5 font-display text-lg font-semibold text-foreground">
-                  {hasActiveFilters ? "No matching tickets" : "No tickets yet"}
-                </h3>
-                <p className="mb-6 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  {hasActiveFilters
+              <EmptyState
+                icon={TicketIcon}
+                title={hasActiveFilters ? "No matching tickets" : "No tickets yet"}
+                message={
+                  hasActiveFilters
                     ? "Try adjusting your search or clearing the filters to see more results."
                     : isAdmin || isSupport
                       ? "No support tickets have been submitted yet. New requests will appear here."
-                      : "You haven't submitted any support tickets yet. Create one to get help from the IT team."}
-                </p>
-                {!hasActiveFilters && (
-                  <Button className="gap-2 rounded-xl" onClick={() => setIsDialogOpen(true)}>
-                    <FilePlus className="h-4 w-4" /> Create ticket
-                  </Button>
-                )}
-                {hasActiveFilters && (
-                  <Button
-                    variant="outline"
-                    className="gap-2 rounded-xl"
-                    onClick={() => {
-                      setSearch("");
-                      setStatusFilter("all");
-                      setResolvedClosed(false);
-                      setPriorityFilter("all");
-                      setAssigneeFilter("all");
-                    }}
-                  >
-                    <X className="h-4 w-4" /> Clear all filters
-                  </Button>
-                )}
-              </div>
+                      : "You haven't submitted any support tickets yet. Create one to get help from the IT team."
+                }
+                action={
+                  !hasActiveFilters ? (
+                    <Button className="gap-2 rounded-xl" onClick={() => setIsDialogOpen(true)}>
+                      <FilePlus className="h-4 w-4" /> Create ticket
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      className="gap-2 rounded-xl"
+                      onClick={() => {
+                        setSearch("");
+                        setStatusFilter("all");
+                        setResolvedClosed(false);
+                        setPriorityFilter("all");
+                        setAssigneeFilter("all");
+                      }}
+                    >
+                      <X className="h-4 w-4" /> Clear all filters
+                    </Button>
+                  )
+                }
+              />
             ) : showPersonalTicketGroups ? (
               <div className="space-y-5">
                 <PagedTicketGroup

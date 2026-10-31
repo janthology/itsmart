@@ -4,6 +4,7 @@ import { useGetAssets, useCreateAsset, useAddAssetHistory, AssetCategory, AssetS
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
+import { ListSkeleton, EmptyState, ErrorState } from "@/components/ui/page-states";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,7 +112,7 @@ export default function AssetsList() {
     queryFilters.assignedTo = user?.id;
   }
 
-  const { data, isLoading } = useGetAssets({ query: queryFilters });
+  const { data, isLoading, error: assetsError, refetch: refetchAssets } = useGetAssets({ query: queryFilters });
   const createMutation = useCreateAsset();
   const addHistory = useAddAssetHistory();
 
@@ -339,39 +340,39 @@ export default function AssetsList() {
             />
 
             {isLoading ? (
-              <div className="space-y-2 rounded-3xl border border-border/60 bg-card/60 p-2">
-                {Array.from({ length: 8 }).map((_, i) => (
-                  <div key={i} className="h-16 rounded-xl bg-muted/40 animate-pulse" />
-                ))}
-              </div>
+              <ListSkeleton rowHeight={64} />
+            ) : assetsError && !data ? (
+              <ErrorState
+                title="Couldn't load assets"
+                message="The asset registry couldn't be loaded. Check your connection and try again."
+                onRetry={() => refetchAssets()}
+              />
             ) : !allAssets.length ? (
-              <div className="flex flex-col items-center justify-center rounded-3xl border border-border/50 bg-card/75 p-16 text-center shadow-sm">
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/[0.06] ring-1 ring-primary/10">
-                  <MonitorSmartphone className="h-8 w-8 text-primary/40" />
-                </div>
-                <h3 className="mb-1.5 font-display text-lg font-semibold text-foreground">
-                  {hasActiveFilters ? "No matching assets" : "No assets yet"}
-                </h3>
-                <p className="mb-6 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  {hasActiveFilters
+              <EmptyState
+                icon={MonitorSmartphone}
+                title={hasActiveFilters ? "No matching assets" : "No assets yet"}
+                message={
+                  hasActiveFilters
                     ? "Try adjusting your search or clearing the filters."
                     : isAdmin
                       ? "Start building your inventory by adding your first asset."
-                      : "No assets have been assigned to you yet."}
-                </p>
-                {isAdmin && !hasActiveFilters && (
-                  <Button
-                    className="gap-2 rounded-xl"
-                    onClick={async () => {
-                      setIsDialogOpen(true);
-                      const tag = await generateNextAssetTag();
-                      form.setValue("assetTag", tag);
-                    }}
-                  >
-                    <PackagePlus className="h-4 w-4" /> Add first asset
-                  </Button>
-                )}
-              </div>
+                      : "No assets have been assigned to you yet."
+                }
+                action={
+                  isAdmin && !hasActiveFilters ? (
+                    <Button
+                      className="gap-2 rounded-xl"
+                      onClick={async () => {
+                        setIsDialogOpen(true);
+                        const tag = await generateNextAssetTag();
+                        form.setValue("assetTag", tag);
+                      }}
+                    >
+                      <PackagePlus className="h-4 w-4" /> Add first asset
+                    </Button>
+                  ) : undefined
+                }
+              />
             ) : (
               <>
                 <AssetInventoryList assets={pagedAssets as any} total={allAssets.length} />

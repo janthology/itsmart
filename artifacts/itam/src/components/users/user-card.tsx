@@ -1,4 +1,5 @@
 import { format, formatDistanceToNow } from "date-fns";
+import { roleLabel } from "@/lib/labels";
 import { UserCog, Headphones, User, KeyRound, UserCheck, UserX, Loader2, Mail, Building2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,9 +40,6 @@ function roleAccent(role: string) {
   return "from-violet-400/80 via-violet-300/60 to-violet-400/30";
 }
 
-function roleLabel(role: string) {
-  return role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
 
 function RoleIcon({ role, className }: { role: string; className?: string }) {
   if (role === "administrator") return <UserCog className={className} />;

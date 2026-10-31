@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { ROLE_LABEL as ROLE_LABELS } from "@/lib/labels";
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -26,11 +27,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { motion } from "framer-motion";
 
-const ROLE_LABELS: Record<string, string> = {
-  administrator: "Administrator",
-  support_staff: "Support Staff",
-  general_user: "General User",
-};
 
 function getInitials(name: string) {
   return name

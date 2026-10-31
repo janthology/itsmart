@@ -29,9 +29,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:rounded-xl focus:bg-primary focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-primary-foreground focus:shadow-lg"
+      >
+        Skip to main content
+      </a>
       <AmbientBackground />
       <FloatingNav />
-      <main className="mx-auto max-w-[1400px] px-4 pb-28 pt-[5.5rem] md:px-6 md:pb-8 lg:pt-24">
+      <main id="main-content" className="mx-auto max-w-[1400px] px-4 pb-28 pt-[5.5rem] md:px-6 md:pb-8 lg:pt-24">
         {children}
       </main>
       <BackToTop />

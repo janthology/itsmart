@@ -1,4 +1,5 @@
 import { format, formatDistanceToNow } from "date-fns";
+import { roleLabel } from "@/lib/labels";
 import {
   Mail,
   Building2,
@@ -31,9 +32,6 @@ import { UserRole } from "@/lib/supabase-queries";
 import { cn } from "@/lib/utils";
 import type { UserCardData } from "@/components/users/user-card";
 
-function roleLabel(role: string) {
-  return role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
 
 function RoleIcon({ role, className }: { role: string; className?: string }) {
   if (role === "administrator") return <UserCog className={className} />;

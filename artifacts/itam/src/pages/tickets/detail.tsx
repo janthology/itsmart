@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { TICKET_STATUS_LABEL as STATUS_LABEL, TICKET_PRIORITY_LABEL as PRIORITY_LABEL } from "@/lib/labels";
 import { useRoute, Link } from "wouter";
 import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL, getResolvedTicketAutoCloseAt, RESOLVED_TICKET_AUTO_CLOSE_DAYS } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
@@ -26,22 +27,12 @@ function priorityStripe(priority: string) {
 
 type Role = 'administrator' | 'support_staff' | 'general_user';
 
-const STATUS_LABEL: Record<string, string> = {
-  open: 'Open',
-  in_progress: 'In Progress',
-  on_hold: 'On Hold',
-  resolved: 'Resolved',
-  closed: 'Closed',
-};
 
 // Statuses that require a remarks dialog before applying
 const REQUIRES_REMARKS = new Set(['on_hold', 'resolved', 'closed']);
 
 const PRIORITY_RANK: Record<string, number> = {
   critical: 1, high: 2, medium: 3, low: 4,
-};
-const PRIORITY_LABEL: Record<string, string> = {
-  critical: 'Critical - 1', high: 'High - 2', medium: 'Medium - 3', low: 'Low - 4',
 };
 
 function getAllowedTransitions(current: string, role: Role): string[] {

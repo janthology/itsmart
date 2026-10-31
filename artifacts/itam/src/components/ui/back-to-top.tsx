@@ -6,15 +6,16 @@ export function BackToTop() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const main = document.querySelector("main");
-    if (!main) return;
-    const onScroll = () => setVisible(main.scrollTop > 300);
-    main.addEventListener("scroll", onScroll);
-    return () => main.removeEventListener("scroll", onScroll);
+    // The document (window) scrolls, not <main> — listening on main meant
+    // this button never appeared.
+    const onScroll = () => setVisible(window.scrollY > 300);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   const scrollToTop = () => {
-    document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (

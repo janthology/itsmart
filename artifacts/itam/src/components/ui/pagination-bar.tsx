@@ -27,6 +27,7 @@ export function PaginationBar({ page, pageSize, total, onPage }: PaginationBarPr
           className="h-8 w-8 p-0 rounded-lg"
           disabled={page === 1}
           onClick={() => onPage(page - 1)}
+          aria-label="Previous page"
         >
           <ChevronLeft className="w-4 h-4" />
         </Button>
@@ -47,6 +48,8 @@ export function PaginationBar({ page, pageSize, total, onPage }: PaginationBarPr
                 size="sm"
                 className="h-8 w-8 p-0 rounded-lg text-xs"
                 onClick={() => onPage(p as number)}
+                aria-label={`Page ${p}`}
+                aria-current={p === page ? "page" : undefined}
               >
                 {p}
               </Button>
@@ -57,6 +60,7 @@ export function PaginationBar({ page, pageSize, total, onPage }: PaginationBarPr
           className="h-8 w-8 p-0 rounded-lg"
           disabled={page === totalPages}
           onClick={() => onPage(page + 1)}
+          aria-label="Next page"
         >
           <ChevronRight className="w-4 h-4" />
         </Button>

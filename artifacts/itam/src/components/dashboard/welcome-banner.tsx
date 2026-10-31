@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { ROLE_LABEL as ROLE_LABELS } from "@/lib/labels";
 import { Button } from "@/components/ui/button";
 import { Plus, ArrowUpRight, Sparkles } from "lucide-react";
 import { format } from "date-fns";
@@ -13,11 +14,6 @@ function getGreeting() {
   return "Good evening";
 }
 
-const ROLE_LABELS: Record<string, string> = {
-  administrator: "Administrator",
-  support_staff: "Support Staff",
-  general_user: "General User",
-};
 
 function getInitials(name: string) {
   return name

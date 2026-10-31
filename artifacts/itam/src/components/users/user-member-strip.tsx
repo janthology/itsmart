@@ -1,11 +1,9 @@
 import { ChevronRight } from "lucide-react";
+import { roleLabel } from "@/lib/labels";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import type { UserCardData } from "@/components/users/user-card";
 
-function roleLabel(role: string) {
-  return role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
 
 interface UserMemberStripProps {
   user: UserCardData;

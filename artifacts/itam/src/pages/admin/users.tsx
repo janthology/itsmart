@@ -1,8 +1,10 @@
 import { useState, useEffect, useMemo } from "react";
+import { roleLabel } from "@/lib/labels";
 import { useGetUsers, useUpdateUser, useToggleUserActive, UserRole } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
+import { ListSkeleton, EmptyState, ErrorState } from "@/components/ui/page-states";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,9 +23,6 @@ import { applyUserFilter, type UserRoleFilter } from "@/components/users/user-su
 
 const PAGE_SIZE = 24;
 
-function roleLabel(role: string) {
-  return role.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-}
 
 export default function UsersManagement() {
   const { user, refreshUser } = useAuth();
@@ -44,7 +43,7 @@ export default function UsersManagement() {
   const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
   const [addingUser, setAddingUser] = useState(false);
 
-  const { data: users, isLoading } = useGetUsers({ query: { search: search || undefined } });
+  const { data: users, isLoading, error: usersError, refetch: refetchUsers } = useGetUsers({ query: { search: search || undefined } });
   const updateMutation = useUpdateUser();
   const toggleActiveMutation = useToggleUserActive();
 
@@ -351,41 +350,41 @@ export default function UsersManagement() {
         />
 
         {isLoading ? (
-          <div className="space-y-1.5 rounded-3xl border border-primary/10 bg-card/60 p-2">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="h-[72px] rounded-2xl bg-muted/40 animate-pulse" />
-            ))}
-          </div>
+          <ListSkeleton />
+        ) : usersError && !users ? (
+          <ErrorState
+            title="Couldn't load users"
+            message="The user list couldn't be loaded. Check your connection and try again."
+            onRetry={() => refetchUsers()}
+          />
         ) : !filteredUsers.length ? (
-              <div className="flex flex-col items-center justify-center rounded-3xl border border-border/50 bg-card/75 p-16 text-center shadow-sm">
-                <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/[0.08] ring-1 ring-primary/15">
-                  <Users className="h-8 w-8 text-primary/60" />
-                </div>
-                <h3 className="mb-1.5 font-display text-lg font-semibold text-foreground">
-                  {hasActiveFilters ? "No matching users" : "No users yet"}
-                </h3>
-                <p className="mb-6 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  {hasActiveFilters
-                    ? "Try adjusting your search or clearing the filters to see more users."
-                    : "Add your first user to get started with team access management."}
-                </p>
-                {!hasActiveFilters ? (
-                  <Button className="gap-2 rounded-xl" onClick={() => setAddUserOpen(true)}>
-                    <UserPlus className="h-4 w-4" /> Add first user
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    className="gap-2 rounded-xl"
-                    onClick={() => {
-                      setSearch("");
-                      setRoleFilter("all");
-                    }}
-                  >
-                    <X className="h-4 w-4" /> Clear all filters
-                  </Button>
-                )}
-              </div>
+          <EmptyState
+            icon={Users}
+            title={hasActiveFilters ? "No matching users" : "No users yet"}
+            message={
+              hasActiveFilters
+                ? "Try adjusting your search or clearing the filters to see more users."
+                : "Add your first user to get started with team access management."
+            }
+            action={
+              !hasActiveFilters ? (
+                <Button className="gap-2 rounded-xl" onClick={() => setAddUserOpen(true)}>
+                  <UserPlus className="h-4 w-4" /> Add first user
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  className="gap-2 rounded-xl"
+                  onClick={() => {
+                    setSearch("");
+                    setRoleFilter("all");
+                  }}
+                >
+                  <X className="h-4 w-4" /> Clear all filters
+                </Button>
+              )
+            }
+          />
         ) : (
           <>
             <UserTeamPanel
