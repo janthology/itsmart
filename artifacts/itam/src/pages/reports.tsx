@@ -25,7 +25,7 @@ import {
 } from "@/lib/reports";
 import { useToast } from "@/hooks/use-toast";
 import { isWithinInterval, parseISO, startOfDay, endOfDay, format } from "date-fns";
-import { SLA_HOURS } from "@/lib/sla";
+import { getPerformanceSLA, summarizePerformanceSLA } from "@/lib/performance-sla";
 import { ReportPreviewTable, PREVIEW_ROWS } from "@/components/reports/report-preview-table";
 import { ReportDateRange } from "@/components/reports/report-date-range";
 import { ReportExportBar } from "@/components/reports/report-export-bar";
@@ -123,20 +123,7 @@ export default function Reports() {
     ? (ratedTickets.reduce((s: number, t: any) => s + t.satisfactionRating, 0) / ratedTickets.length).toFixed(1)
     : null;
 
-  const slaStats = useMemo(() => {
-    let met = 0;
-    let breached = 0;
-    let pending = 0;
-    for (const t of perfTickets) {
-      const target = SLA_HOURS[t.priority] ?? 24;
-      const resMs = t.resolvedAt ? new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime() : null;
-      const resH = resMs != null ? resMs / 3600000 : null;
-      if (resH == null) pending++;
-      else if (resH <= target) met++;
-      else breached++;
-    }
-    return { met, breached, pending };
-  }, [perfTickets]);
+  const slaStats = useMemo(() => summarizePerformanceSLA(perfTickets), [perfTickets]);
 
   const activeCount = useMemo(() => {
     switch (activeId) {
@@ -193,16 +180,13 @@ export default function Reports() {
 
   const perfPreviewCols = ["Ticket No.", "Title", "Priority", "Assigned To", "Created", "Resolved", "Res. Time (h)", "SLA (h)", "SLA Status"];
   const perfPreviewRows = perfTickets.slice(0, PREVIEW_ROWS).map((t: any) => {
-    const target = SLA_HOURS[t.priority] ?? 24;
-    const resMs = t.resolvedAt ? new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime() : null;
-    const resH = resMs != null ? +(resMs / 3600000).toFixed(2) : null;
+    const sla = getPerformanceSLA(t);
     return [
       t.ticketNumber ?? `#${t.id.substring(0, 8)}`, t.title, t.priority,
       t.assignedTo?.fullName ?? "—",
       format(new Date(t.createdAt), "MMM d, yyyy"),
-      t.resolvedAt ? format(new Date(t.resolvedAt), "MMM d, yyyy") : null,
-      resH, target,
-      resH == null ? "Pending" : resH <= target ? "Met" : "Breached",
+      sla.resolutionHours !== null && t.resolvedAt ? format(new Date(t.resolvedAt), "MMM d, yyyy") : null,
+      sla.resolutionHours, sla.targetHours, sla.status,
     ];
   });
 
@@ -381,6 +365,14 @@ export default function Reports() {
                           {slaStats.pending} pending
                         </span>
                       )}
+                      {slaStats.closedWithoutResolution > 0 && (
+                        <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-muted text-muted-foreground border border-border font-medium">
+                          {slaStats.closedWithoutResolution} closed without resolution
+                        </span>
+                      )}
+                      <p className="w-full text-xs text-muted-foreground leading-relaxed">
+                        Resolution time excludes time on hold. SLA outcomes use unrounded hours; displayed hours are rounded to two decimals.
+                      </p>
                     </div>
                   )}
                   {!activeLoading && activeId === "ticket_satisfaction" && avgRating && (

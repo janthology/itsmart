@@ -44,7 +44,7 @@ jobs:
     # Browser smoke tests against the production build. Separate job so a
     # browser-download hiccup never blocks the main typecheck/build gate.
     runs-on: ubuntu-latest
-    # Signed-out tests need a configured client, but never call a live project.
+    # Tests use a dummy client and synthetic data, never a live project.
     env:
       VITE_SUPABASE_URL: https://example.supabase.co
       VITE_SUPABASE_ANON_KEY: test-anon-key

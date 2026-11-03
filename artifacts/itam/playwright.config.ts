@@ -1,12 +1,9 @@
 import { defineConfig } from "@playwright/test";
 
 // Browser smoke tests against the production build (vite preview).
-// They only cover flows that work signed-out — no credentials or live
-// Supabase writes — so they can run in CI on every push:
-//   1. the login page renders,
-//   2. a protected route redirects signed-out visitors to /login,
-//   3. /register redirects to /login (public signup is disabled).
-// Role-based click-throughs stay in docs/smoke-test-checklist.md.
+// Signed-out flows and the synthetic-session report test use no real
+// credentials or live Supabase writes, so they can run in CI on every push.
+// Live role-based click-throughs stay in docs/smoke-test-checklist.md.
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,

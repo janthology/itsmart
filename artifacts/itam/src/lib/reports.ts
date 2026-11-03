@@ -1,4 +1,5 @@
 import { format, parseISO } from "date-fns";
+import { getPerformanceSLA } from "./performance-sla";
 
 // xlsx and jsPDF are heavy (~1 MB combined) and only needed when a user
 // actually exports a report, so they are loaded on demand instead of
@@ -223,14 +224,10 @@ export async function exportAssetHistoryPdf(history: any[], filters: { from?: st
 
 // ─── Ticket Resolution Performance Report ────────────────────────────────────
 
-const SLA_HOURS: Record<string, number> = { critical: 4, high: 8, medium: 24, low: 72 };
-
 export async function exportTicketPerformanceXlsx(tickets: any[]) {
   const XLSX = await loadXlsx();
   const rows = tickets.map((t) => {
-    const target = SLA_HOURS[t.priority] ?? 24;
-    const resMs = t.resolvedAt ? new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime() : null;
-    const resH = resMs != null ? +(resMs / 3600000).toFixed(2) : null;
+    const sla = getPerformanceSLA(t);
     return {
       "Ticket No.": t.ticketNumber ?? t.id.substring(0, 8),
       "Title": t.title,
@@ -240,15 +237,22 @@ export async function exportTicketPerformanceXlsx(tickets: any[]) {
       "Requester": t.createdBy?.fullName ?? "",
       "Assigned To": t.assignedTo?.fullName ?? "",
       "Created At": format(new Date(t.createdAt), "yyyy-MM-dd HH:mm"),
-      "Resolved At": t.resolvedAt ? format(new Date(t.resolvedAt), "yyyy-MM-dd HH:mm") : "",
-      "Resolution Time (h)": resH ?? "",
-      "SLA Target (h)": target,
-      "SLA Status": resH == null ? "Pending" : resH <= target ? "Met" : "Breached",
+      "Resolved At": sla.resolutionHours !== null && t.resolvedAt ? format(new Date(t.resolvedAt), "yyyy-MM-dd HH:mm") : "",
+      "Resolution Time (h)": sla.resolutionHours ?? "",
+      "SLA Target (h)": sla.targetHours,
+      "SLA Status": sla.status,
     };
   });
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "Performance");
+  const notes = XLSX.utils.aoa_to_sheet([
+    ["SLA report notes"],
+    ["Resolution Time (h) excludes time on hold and is rounded to two decimals for display."],
+    ["SLA outcomes are determined using unrounded active hours."],
+    ["Closed without resolution tickets are separate from Met, Breached, and Pending."],
+  ]);
+  XLSX.utils.book_append_sheet(wb, notes, "Notes");
   XLSX.writeFile(wb, `ticket-performance-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
@@ -265,25 +269,24 @@ export async function exportTicketPerformancePdf(tickets: any[], filters: { from
     const range = [filters.from && `From: ${format(parseISO(filters.from), "MMM d, yyyy")}`, filters.to && `To: ${format(parseISO(filters.to), "MMM d, yyyy")}`].filter(Boolean).join("  ");
     doc.text(`Date Range: ${range}`, 14, y);
   }
+  y += 6;
+  doc.text("Resolution time excludes hold time; SLA outcomes use unrounded hours.", 14, y);
   doc.setTextColor(0);
   autoTable(doc, {
     startY: y + 5,
     head: [["Ticket No.", "Title", "Priority", "Assigned To", "Created", "Resolved", "Res. Time (h)", "SLA Target (h)", "SLA"]],
     body: tickets.map((t) => {
-      const target = SLA_HOURS[t.priority] ?? 24;
-      const resMs = t.resolvedAt ? new Date(t.resolvedAt).getTime() - new Date(t.createdAt).getTime() : null;
-      const resH = resMs != null ? +(resMs / 3600000).toFixed(2) : null;
-      const slaStatus = resH == null ? "Pending" : resH <= target ? "Met" : "Breached";
+      const sla = getPerformanceSLA(t);
       return [
         t.ticketNumber ?? `#${t.id.substring(0, 8)}`,
         t.title,
         t.priority,
         t.assignedTo?.fullName ?? "—",
         format(new Date(t.createdAt), "MMM d, yyyy"),
-        t.resolvedAt ? format(new Date(t.resolvedAt), "MMM d, yyyy") : "—",
-        resH ?? "—",
-        target,
-        slaStatus,
+        sla.resolutionHours !== null && t.resolvedAt ? format(new Date(t.resolvedAt), "MMM d, yyyy") : "—",
+        sla.resolutionHours ?? "—",
+        sla.targetHours,
+        sla.status,
       ];
     }),
     styles: { fontSize: 8, cellPadding: 3 },
