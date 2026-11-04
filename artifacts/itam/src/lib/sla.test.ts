@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { computeSLA, SLA_HOURS } from "./sla";
 
 const created = "2026-01-01T00:00:00.000Z";
@@ -44,11 +44,32 @@ describe("computeSLA", () => {
     expect(info.status).toBe("paused");
   });
 
-  it("uses closedAt as the terminal time when never resolved", () => {
-    // medium = 24h; closed directly after 30h -> breached
-    const info = computeSLA("medium", created, null, "closed", 0, null, "2026-01-02T06:00:00.000Z");
-    expect(info.status).toBe("breached");
-    expect(info.elapsedHours).toBeCloseTo(30);
+  it("retains pending, at-risk and breached states for open tickets", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-01-01T05:00:00.000Z"));
+      expect(computeSLA("high", created, null, "open").status).toBe("pending");
+      vi.setSystemTime(new Date("2026-01-01T06:00:00.000Z"));
+      expect(computeSLA("high", created, null, "in_progress").status).toBe("at_risk");
+      vi.setSystemTime(new Date("2026-01-01T09:00:00.000Z"));
+      expect(computeSLA("high", created, null, "in_progress").status).toBe("breached");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("marks direct closure as not applicable, regardless of close time", () => {
+    for (const closedAt of ["2026-01-01T01:00:00.000Z", "2026-01-02T06:00:00.000Z", null]) {
+      const info = computeSLA("medium", created, null, "closed", 0, null, closedAt);
+      expect(info.status).toBe("not_applicable");
+      expect(info.label).toBe("Closed without resolution");
+    }
+  });
+
+  it("keeps the resolution SLA outcome after a resolved ticket is closed", () => {
+    const info = computeSLA("high", created, "2026-01-01T10:00:00.000Z", "closed", 4 * 3600, null, "2026-01-08T10:00:00.000Z");
+    expect(info.status).toBe("met");
+    expect(info.elapsedHours).toBe(6);
   });
 
   it("falls back to a 24h target for unknown priorities", () => {

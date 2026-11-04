@@ -40,8 +40,11 @@ test("performance preview and exports agree on hold time, boundaries and direct 
     const headers = { "access-control-allow-origin": "*", "access-control-allow-headers": "*", "access-control-allow-methods": "GET, OPTIONS" };
     if (request.method() === "OPTIONS") return route.fulfill({ status: 204, headers });
     if (request.method() !== "GET") throw new Error(`Unexpected request: ${request.method()} ${path}`);
-    const body = path === "/rest/v1/profiles" ? { must_change_password: false }
-      : path === "/rest/v1/tickets" ? tickets : [];
+    const ticketId = url.searchParams.get("id")?.replace(/^eq\./, "");
+    const singleTicket = ticketId ? tickets.find((ticket) => ticket.id === ticketId) : undefined;
+    const body = path === "/rest/v1/profiles" && url.searchParams.get("select") === "must_change_password"
+      ? { must_change_password: false }
+      : path === "/rest/v1/tickets" ? (singleTicket ? { ...singleTicket, comments: [] } : tickets) : [];
     await route.fulfill({ status: 200, headers, contentType: "application/json", body: JSON.stringify(body) });
   });
 
@@ -75,4 +78,14 @@ test("performance preview and exports agree on hold time, boundaries and direct 
   expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   expect(pdf.toString("latin1")).toContain("(Breached)");
   expect(pdf.toString("latin1")).toContain("(Met)");
+
+  // The ticket badge uses the same direct-closure policy as the report.
+  await page.goto("/tickets/ticket-3");
+  const directBadge = page.getByText("SLA not applicable", { exact: true }).locator("../..");
+  await expect(directBadge).toContainText("Closed without resolution");
+  await expect(directBadge).not.toContainText("Deadline");
+  await expect(directBadge).not.toContainText("Target");
+  await page.goto("/tickets/ticket-1");
+  await expect(page.getByText("Resolved in 6h", { exact: true })).toBeVisible();
+  await expect(page.getByText("SLA not applicable", { exact: true })).toHaveCount(0);
 });

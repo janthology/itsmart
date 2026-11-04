@@ -1,4 +1,4 @@
-import { computeSLA, SLA_HOURS } from "./sla";
+import { computeSLA, isClosedWithoutResolution, SLA_HOURS } from "./sla";
 
 /** The resolution report deliberately keeps active tickets pending, even if
  * their live SLA badge is at risk or breached. Direct closures are not
@@ -22,7 +22,7 @@ export interface PerformanceSLA {
 
 export function getPerformanceSLA(ticket: PerformanceSLATicket): PerformanceSLA {
   const targetHours = SLA_HOURS[ticket.priority] ?? 24;
-  if (ticket.status === "closed" && !ticket.resolvedAt) {
+  if (isClosedWithoutResolution(ticket.status, ticket.resolvedAt)) {
     return { status: "Closed without resolution", targetHours, resolutionHours: null };
   }
   if (!ticket.resolvedAt || (ticket.status !== "resolved" && ticket.status !== "closed")) {

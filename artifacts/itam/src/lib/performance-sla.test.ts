@@ -35,6 +35,7 @@ describe("resolution performance SLA", () => {
     const directlyClosed = { ...resolved, status: "closed", resolvedAt: null };
     const active = { ...resolved, status: "on_hold", resolvedAt: null };
     expect(getPerformanceSLA(directlyClosed)).toEqual({ status: "Closed without resolution", targetHours: 8, resolutionHours: null });
+    expect(computeSLA(directlyClosed.priority, directlyClosed.createdAt, directlyClosed.resolvedAt, directlyClosed.status, directlyClosed.totalHoldSeconds).status).toBe("not_applicable");
     expect(getPerformanceSLA(active)).toEqual({ status: "Pending", targetHours: 8, resolutionHours: null });
     expect(summarizePerformanceSLA([resolved, directlyClosed, active])).toEqual({ met: 1, breached: 0, pending: 1, closedWithoutResolution: 1 });
   });

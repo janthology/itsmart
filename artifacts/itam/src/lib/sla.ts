@@ -6,8 +6,15 @@ export const SLA_HOURS: Record<string, number> = {
   low: 72,
 };
 
-export type SLAStatus = 'met' | 'at_risk' | 'breached' | 'paused' | 'pending';
+export type SLAStatus = 'met' | 'at_risk' | 'breached' | 'paused' | 'pending' | 'not_applicable';
 
+/** Directly closed tickets did not reach resolution and have no resolution SLA outcome. */
+export function isClosedWithoutResolution(ticketStatus: string, resolvedAt?: string | null): boolean {
+  return ticketStatus === 'closed' && !resolvedAt;
+}
+
+/** When status is not_applicable, timing fields are not a resolution outcome
+ * and must not be displayed as a target, deadline, or progress. */
 export interface SLAInfo {
   targetHours: number;
   deadlineAt: Date;
@@ -75,7 +82,9 @@ export function computeSLA(
   const isOnHold = ticketStatus === 'on_hold';
 
   let status: SLAStatus;
-  if (isTerminal) {
+  if (isClosedWithoutResolution(ticketStatus, resolvedAt)) {
+    status = 'not_applicable';
+  } else if (isTerminal) {
     status = remainingHours >= 0 ? 'met' : 'breached';
   } else if (isOnHold) {
     status = 'paused';
@@ -88,7 +97,9 @@ export function computeSLA(
   }
 
   let label: string;
-  if (isTerminal) {
+  if (status === 'not_applicable') {
+    label = 'Closed without resolution';
+  } else if (isTerminal) {
     label = status === 'met'
       ? `Resolved in ${formatHours(elapsedHours)}`
       : `Breached by ${formatHours(-remainingHours)}`;

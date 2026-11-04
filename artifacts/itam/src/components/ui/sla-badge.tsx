@@ -1,6 +1,6 @@
 import { computeSLA, SLA_HOURS } from "@/lib/sla";
 import { cn } from "@/lib/utils";
-import { Clock, CheckCircle2, AlertTriangle, TimerOff, PauseCircle } from "lucide-react";
+import { Clock, CheckCircle2, AlertTriangle, TimerOff, PauseCircle, CircleMinus } from "lucide-react";
 import { format } from "date-fns";
 
 interface SLABadgeProps {
@@ -21,6 +21,7 @@ const STATUS_STYLES = {
   breached: { bar: "bg-red-500",     text: "text-red-700 dark:text-red-400",         bg: "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800/50" },
   paused:   { bar: "bg-neutral-400", text: "text-neutral-600 dark:text-neutral-400", bg: "bg-neutral-100 dark:bg-neutral-800/30 border-neutral-300 dark:border-neutral-600/50" },
   pending:  { bar: "bg-blue-400",    text: "text-blue-700 dark:text-blue-400",       bg: "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50" },
+  not_applicable: { bar: "bg-muted", text: "text-muted-foreground", bg: "bg-muted/50 border-border" },
 };
 
 const STATUS_ICON = {
@@ -29,6 +30,7 @@ const STATUS_ICON = {
   breached: TimerOff,
   paused:   PauseCircle,
   pending:  Clock,
+  not_applicable: CircleMinus,
 };
 
 export function SLABadge({ priority, createdAt, resolvedAt, closedAt, ticketStatus, totalHoldSeconds = 0, onHoldAt, variant = "compact", className }: SLABadgeProps) {
@@ -45,6 +47,20 @@ export function SLABadge({ priority, createdAt, resolvedAt, closedAt, ticketStat
         <Icon className="w-3 h-3" />
         {sla.label}
       </span>
+    );
+  }
+
+  if (sla.status === "not_applicable") {
+    return (
+      <div className={cn("rounded-xl border p-4 space-y-2", styles.bg, className)}>
+        <div className="flex items-center gap-2">
+          <Icon className={cn("w-4 h-4", styles.text)} />
+          <span className={cn("text-sm font-semibold", styles.text)}>SLA not applicable</span>
+        </div>
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Closed without resolution; no resolution SLA outcome applies.
+        </p>
+      </div>
     );
   }
 
