@@ -46,8 +46,37 @@ export default function ChangePassword() {
   const [showCurrent, setShowCurrent] = useState(false);
   const [showNext, setShowNext] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [pendingPasswordChangedAt, setPendingPasswordChangedAt] = useState<string | null>(null);
+  const profileUpdatePending = pendingPasswordChangedAt !== null;
 
   const isMandatory = mustChangePassword;
+
+  // Auth and profile updates are separate operations. Never repeat the Auth
+  // update after it succeeds: retries only finish the pending profile update.
+  const finishProfileUpdate = async (changedAt: string) => {
+    if (!user?.id) throw new Error("Your session is no longer available.");
+    const { data, error } = await supabase.from("profiles").update({
+      must_change_password: false,
+      password_changed_at: changedAt,
+    }).eq("id", user.id).select("id");
+    if (error || data?.length !== 1) throw new Error("Could not update the account record.");
+    setPendingPasswordChangedAt(null);
+    toast({ title: "Password changed", description: "Your password has been updated successfully." });
+    clearMustChangePassword();
+    setLocation("/dashboard");
+  };
+
+  const retryProfileUpdate = async () => {
+    setLoading(true);
+    try {
+      if (!pendingPasswordChangedAt) return;
+      await finishProfileUpdate(pendingPasswordChangedAt);
+    } catch {
+      toast({ variant: "destructive", title: "Account update still incomplete", description: "Your new password is already active. Try again or contact an administrator." });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -59,44 +88,32 @@ export default function ChangePassword() {
       toast({ variant: "destructive", title: "Password too weak", description: "Password must be at least 8 characters and include an uppercase letter, a number, and a special character." });
       return;
     }
-    if (next.toLowerCase() === "dostro2") {
-      toast({ variant: "destructive", title: "Choose a different password", description: "You cannot keep the default password." });
-      return;
-    }
-    if (next === current) {
-      toast({ variant: "destructive", title: "Choose a different password", description: "Your new password must be different from your current password." });
+    if (next.toLowerCase() === "dostro2" || next === current) {
+      toast({ variant: "destructive", title: "Choose a different password", description: "Your new password must be different from your current or default password." });
       return;
     }
 
     setLoading(true);
     try {
-      // Re-authenticate with current password first
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user?.email ?? "",
-        password: current,
-      });
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: user?.email ?? "", password: current });
       if (signInError) {
         toast({ variant: "destructive", title: "Incorrect current password", description: "Please enter your current password correctly." });
         return;
       }
-
-      // Update password
       const { error } = await supabase.auth.updateUser({ password: next });
       if (error) throw error;
 
-      // Clear the must_change_password flag and stamp password_changed_at
-      if (user?.id) {
-        await supabase.from("profiles").update({
-          must_change_password: false,
-          password_changed_at: new Date().toISOString(),
-        }).eq("id", user.id);
+      // Clear secrets immediately; the new password is now active even if the
+      // following request fails or returns no updated row.
+      setCurrent(""); setNext(""); setConfirm("");
+      const changedAt = new Date().toISOString();
+      try {
+        await finishProfileUpdate(changedAt);
+      } catch {
+        setPendingPasswordChangedAt(changedAt);
       }
-
-      toast({ title: "Password changed", description: "Your password has been updated successfully." });
-      clearMustChangePassword();
-      setLocation("/dashboard");
-    } catch (err: any) {
-      toast({ variant: "destructive", title: "Error", description: err.message || "Failed to change password." });
+    } catch {
+      toast({ variant: "destructive", title: "Password change not confirmed", description: "The update may not have completed. If the old password no longer works, try the new one or contact an administrator." });
     } finally {
       setLoading(false);
     }
@@ -120,14 +137,25 @@ export default function ChangePassword() {
             <CardTitle className="text-xl font-display flex items-center gap-2">
               <KeyRound className="w-5 h-5 text-primary" /> Change Password
             </CardTitle>
-            <CardDescription>Enter your current password and choose a new one.</CardDescription>
+            <CardDescription>{profileUpdatePending ? "Finish updating your account record." : "Enter your current password and choose a new one."}</CardDescription>
           </CardHeader>
           <CardContent className="px-8 pb-8">
-            <form onSubmit={handleSubmit} className="space-y-5">
+            {profileUpdatePending ? (
+              <div className="space-y-4">
+                <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                  <p className="font-semibold">Your new password is active, but the account update is incomplete.</p>
+                  <p className="mt-1">Use your new password to sign in. Retry the account update below. If the problem continues, contact an administrator. If you reload, use your new password as the current password.</p>
+                </div>
+                <Button type="button" onClick={retryProfileUpdate} disabled={loading} className="w-full rounded-xl">
+                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Retry account update
+                </Button>
+              </div>
+            ) : <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-1.5">
-                <Label>Current Password</Label>
+                <Label htmlFor="current-password">Current Password</Label>
                 <div className="relative">
                   <Input
+                    id="current-password" autoComplete="current-password"
                     type={showCurrent ? "text" : "password"}
                     value={current}
                     onChange={e => setCurrent(e.target.value)}
@@ -135,7 +163,7 @@ export default function ChangePassword() {
                     className="h-11 rounded-xl pr-10"
                     required
                   />
-                  <button type="button" onClick={() => setShowCurrent(v => !v)}
+                  <button type="button" aria-label={showCurrent ? "Hide current password" : "Show current password"} onClick={() => setShowCurrent(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     {showCurrent ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -143,9 +171,10 @@ export default function ChangePassword() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>New Password</Label>
+                <Label htmlFor="new-password">New Password</Label>
                 <div className="relative">
                   <Input
+                    id="new-password" autoComplete="new-password"
                     type={showNext ? "text" : "password"}
                     value={next}
                     onChange={e => setNext(e.target.value)}
@@ -153,7 +182,7 @@ export default function ChangePassword() {
                     className="h-11 rounded-xl pr-10"
                     required
                   />
-                  <button type="button" onClick={() => setShowNext(v => !v)}
+                  <button type="button" aria-label={showNext ? "Hide new password" : "Show new password"} onClick={() => setShowNext(v => !v)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     {showNext ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
@@ -191,8 +220,9 @@ export default function ChangePassword() {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Confirm New Password</Label>
+                <Label htmlFor="confirm-password">Confirm New Password</Label>
                 <Input
+                  id="confirm-password" autoComplete="new-password"
                   type="password"
                   value={confirm}
                   onChange={e => setConfirm(e.target.value)}
@@ -218,7 +248,7 @@ export default function ChangePassword() {
                   Change Password
                 </Button>
               </div>
-            </form>
+            </form>}
           </CardContent>
         </Card>
       </div>

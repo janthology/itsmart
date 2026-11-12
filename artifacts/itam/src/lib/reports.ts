@@ -1,5 +1,6 @@
 import { format, parseISO } from "date-fns";
 import { getPerformanceSLA } from "./performance-sla";
+import { computeDepreciation } from "./depreciation";
 
 // xlsx and jsPDF are heavy (~1 MB combined) and only needed when a user
 // actually exports a report, so they are loaded on demand instead of
@@ -368,7 +369,6 @@ export async function exportUnassignedAssetsXlsx(assets: any[]) {
     "Location": a.location ?? "",
     "Purchase Date": a.purchaseDate ? format(new Date(a.purchaseDate), "yyyy-MM-dd") : "",
     "Purchase Value (₱)": a.purchaseValue ?? "",
-    "Days Unassigned": a.purchaseDate ? Math.floor((Date.now() - new Date(a.purchaseDate).getTime()) / 86400000) : "",
   }));
   const ws = XLSX.utils.json_to_sheet(rows);
   const wb = XLSX.utils.book_new();
@@ -405,16 +405,6 @@ export async function exportUnassignedAssetsPdf(assets: any[]) {
 
 const USEFUL_LIFE_YEARS = 5; // straight-line over 5 years
 
-function computeDepreciation(purchaseValue: number, purchaseDate: string) {
-  const ageMs = Date.now() - new Date(purchaseDate).getTime();
-  const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
-  const annualDep = purchaseValue / USEFUL_LIFE_YEARS;
-  const accumulated = Math.min(annualDep * ageYears, purchaseValue);
-  const currentValue = Math.max(purchaseValue - accumulated, 0);
-  const pctDepreciated = Math.min(Math.round((accumulated / purchaseValue) * 100), 100);
-  return { ageYears: +ageYears.toFixed(2), annualDep: +annualDep.toFixed(2), accumulated: +accumulated.toFixed(2), currentValue: +currentValue.toFixed(2), pctDepreciated };
-}
-
 export async function exportDepreciationXlsx(assets: any[]) {
   const XLSX = await loadXlsx();
   const rows = assets
@@ -429,11 +419,11 @@ export async function exportDepreciationXlsx(assets: any[]) {
         "Assigned To": a.assignedTo?.fullName ?? "Unassigned",
         "Purchase Date": format(new Date(a.purchaseDate), "yyyy-MM-dd"),
         "Purchase Value (₱)": Number(a.purchaseValue),
-        "Age (Years)": d.ageYears,
-        "Annual Depreciation (₱)": d.annualDep,
-        "Accumulated Depreciation (₱)": d.accumulated,
-        "Current Value (₱)": d.currentValue,
-        "% Depreciated": d.pctDepreciated,
+        "Age (Years)": d?.ageYears ?? "",
+        "Annual Depreciation (₱)": d?.annualDep ?? "",
+        "Accumulated Depreciation (₱)": d?.accumulated ?? "",
+        "Current Value (₱)": d?.currentValue ?? "",
+        "% Depreciated": d?.pctDepreciated ?? "",
       };
     });
   const ws = XLSX.utils.json_to_sheet(rows);
@@ -460,11 +450,11 @@ export async function exportDepreciationPdf(assets: any[]) {
         a.assetTag, a.name, a.category,
         format(new Date(a.purchaseDate), "MMM d, yyyy"),
         `₱${Number(a.purchaseValue).toLocaleString()}`,
-        d.ageYears,
-        `₱${d.annualDep.toLocaleString()}`,
-        `₱${d.accumulated.toLocaleString()}`,
-        `₱${d.currentValue.toLocaleString()}`,
-        `${d.pctDepreciated}%`,
+        d?.ageYears ?? "—",
+        d ? `₱${d.annualDep.toLocaleString()}` : "—",
+        d ? `₱${d.accumulated.toLocaleString()}` : "—",
+        d ? `₱${d.currentValue.toLocaleString()}` : "—",
+        d?.pctDepreciated != null ? `${d.pctDepreciated}%` : "N/A",
       ];
     }),
     styles: { fontSize: 8, cellPadding: 3 },

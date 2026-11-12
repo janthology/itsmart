@@ -75,9 +75,9 @@ export default function AssetDetail() {
   const { data: asset, isLoading, isError } = useGetAsset(id);
   const updateMutation = useUpdateAsset();
   const { data: allUsers } = useGetUsers();
-  const { data: history = [], isLoading: historyLoading } = useGetAssetHistory(id);
+  const { data: history = [], isLoading: historyLoading, isError: historyError, refetch: refetchHistory } = useGetAssetHistory(id);
   const addHistory = useAddAssetHistory();
-  const { data: maintenanceLog = [], isLoading: maintenanceLoading } = useGetMaintenanceLog(id);
+  const { data: maintenanceLog = [], isLoading: maintenanceLoading, isError: maintenanceError, refetch: refetchMaintenance } = useGetMaintenanceLog(id);
   const addMaintenance = useAddMaintenanceLog();
   const updateSchedule = useUpdatePmSchedule();
   const returnToService = useReturnAssetToService();
@@ -479,6 +479,8 @@ export default function AssetDetail() {
                 <div className="space-y-1">
                   {historyLoading ? (
                     <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                  ) : historyError ? (
+                    <div role="alert" className="text-center py-8 text-destructive"><p>Could not load asset history.</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void refetchHistory()}>Retry</Button></div>
                   ) : history.length === 0 ? (
                     <div className="text-center py-10 text-muted-foreground">
                       <History className="w-10 h-10 mx-auto mb-3 text-muted" />
@@ -582,6 +584,8 @@ export default function AssetDetail() {
                   {/* Log entries */}
                   {maintenanceLoading ? (
                     <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div>
+                  ) : maintenanceError ? (
+                    <div role="alert" className="text-center py-8 text-destructive"><p>Could not load maintenance records.</p><Button variant="outline" size="sm" className="mt-3" onClick={() => void refetchMaintenance()}>Retry</Button></div>
                   ) : maintenanceLog.length === 0 ? (
                     <div className="text-center py-10 text-muted-foreground">
                       <Wrench className="w-10 h-10 mx-auto mb-3 text-muted" />

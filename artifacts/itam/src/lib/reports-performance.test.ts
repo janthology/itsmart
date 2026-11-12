@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   jsonToSheet: vi.fn((rows: unknown) => rows),
@@ -41,6 +41,7 @@ const tickets = [
 ];
 
 beforeEach(() => vi.clearAllMocks());
+afterEach(() => vi.useRealTimers());
 
 describe("ticket performance exports", () => {
   it("writes hold-aware hours and the same unrounded outcomes to Excel", async () => {
@@ -62,19 +63,38 @@ describe("ticket performance exports", () => {
   });
 });
 
-// Known report defects: expected failures turn green only once fixed.
+// Regression checks for asset report integrity.
 describe("asset report audit", () => {
-  it.fails("does not claim time since purchase is time spent unassigned", async () => {
+  it("does not claim time since purchase is time spent unassigned", async () => {
     const { exportUnassignedAssetsXlsx } = await import('./reports');
     await exportUnassignedAssetsXlsx([{ assetTag: 'A-1', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01' }]);
     const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
     expect(row).not.toHaveProperty('Days Unassigned');
   });
 
-  it.fails("does not export NaN depreciation for a zero-value asset", async () => {
+  it("does not export NaN depreciation for a zero-value asset", async () => {
     const { exportDepreciationXlsx } = await import('./reports');
     await exportDepreciationXlsx([{ assetTag: 'A-2', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01', purchaseValue: 0 }]);
     const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
-    expect(Number.isNaN(row['% Depreciated'])).toBe(false);
+    expect(row['% Depreciated']).toBe('');
+    expect(row['Current Value (₱)']).toBe(0);
   });
+
+  it("uses the same future-date and zero-cost rules in Excel and PDF", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const { exportDepreciationXlsx, exportDepreciationPdf } = await import('./reports');
+    const assets = [
+      { assetTag: 'A-1', name: 'Future', category: 'laptop', status: 'active', purchaseDate: '2027-01-01', purchaseValue: 5000 },
+      { assetTag: 'A-2', name: 'Zero', category: 'laptop', status: 'active', purchaseDate: '2020-01-01', purchaseValue: 0 },
+    ];
+    await exportDepreciationXlsx(assets);
+    const rows = mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[];
+    expect(rows.map(r => [r['Age (Years)'], r['Accumulated Depreciation (₱)'], r['Current Value (₱)'], r['% Depreciated']])).toEqual([[0, 0, 5000, 0], [6, 0, 0, '']]);
+    await exportDepreciationPdf(assets);
+    const body = (mocks.autoTable.mock.calls[0][1] as { body: unknown[][] }).body;
+    expect(body[0].slice(5)).toEqual([0, '₱1,000', '₱0', '₱5,000', '0%']);
+    expect(body[1].slice(5)).toEqual([6, '₱0', '₱0', '₱0', 'N/A']);
+  });
+
 });

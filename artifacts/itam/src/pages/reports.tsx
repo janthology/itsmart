@@ -26,6 +26,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { isWithinInterval, parseISO, startOfDay, endOfDay, format } from "date-fns";
 import { getPerformanceSLA, summarizePerformanceSLA } from "@/lib/performance-sla";
+import { computeDepreciation } from "@/lib/depreciation";
 import { ReportPreviewTable, PREVIEW_ROWS } from "@/components/reports/report-preview-table";
 import { ReportDateRange } from "@/components/reports/report-date-range";
 import { ReportExportBar } from "@/components/reports/report-export-bar";
@@ -49,7 +50,7 @@ const REPORT_DEFS: ReportDef[] = [
   { id: "asset_inventory", label: "Inventory", icon: MonitorSmartphone, group: "assets", roles: ["administrator", "support_staff"], description: "Full asset list with status, location, assignment, and purchase info." },
   { id: "asset_history", label: "History", icon: History, group: "assets", roles: ["administrator"], description: "Audit trail of assignments, unassignments, and field changes." },
   { id: "asset_unassigned", label: "Unassigned", icon: PackageX, group: "assets", roles: ["administrator"], description: "Assets without an assigned user — useful for utilization reviews." },
-  { id: "asset_depreciation", label: "Depreciation", icon: TrendingDown, group: "assets", roles: ["administrator"], description: "Straight-line depreciation over 5 years with estimated current value." },
+  { id: "asset_depreciation", label: "Depreciation", icon: TrendingDown, group: "assets", roles: ["administrator"], description: "Estimated straight-line depreciation over 5 years. Future purchases start at cost; zero-cost percentages are N/A." },
   { id: "ticket_list", label: "Tickets", icon: TicketIcon, group: "tickets", roles: ["administrator", "support_staff", "general_user"], description: "Support tickets filtered by status, priority, and date." },
   { id: "ticket_performance", label: "Performance", icon: Gauge, group: "tickets", roles: ["administrator", "support_staff"], description: "Resolution time vs SLA target — Met or Breached per ticket." },
   { id: "ticket_satisfaction", label: "Satisfaction", icon: Star, group: "tickets", roles: ["administrator", "support_staff"], description: "User satisfaction ratings with average score and comments." },
@@ -207,17 +208,12 @@ export default function Reports() {
 
   const depPreviewCols = ["Tag", "Name", "Category", "Purchase Date", "Purchase Value (₱)", "Age (yrs)", "Current Value (₱)", "% Dep."];
   const depPreviewRows = depreciationAssets.slice(0, PREVIEW_ROWS).map((a: any) => {
-    const ageMs = Date.now() - new Date(a.purchaseDate).getTime();
-    const ageYears = +(ageMs / (1000 * 60 * 60 * 24 * 365.25)).toFixed(2);
-    const annual = Number(a.purchaseValue) / 5;
-    const accumulated = Math.min(annual * ageYears, Number(a.purchaseValue));
-    const current = Math.max(Number(a.purchaseValue) - accumulated, 0);
-    const pct = Math.min(Math.round((accumulated / Number(a.purchaseValue)) * 100), 100);
+    const d = computeDepreciation(Number(a.purchaseValue), a.purchaseDate);
     return [
       a.assetTag, a.name, a.category,
       format(new Date(a.purchaseDate), "MMM d, yyyy"),
       `₱${Number(a.purchaseValue).toLocaleString()}`,
-      ageYears, `₱${current.toLocaleString()}`, `${pct}%`,
+      d?.ageYears ?? null, d ? `₱${d.currentValue.toLocaleString()}` : null, d?.pctDepreciated != null ? `${d.pctDepreciated}%` : "N/A",
     ];
   });
 
