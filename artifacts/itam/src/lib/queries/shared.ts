@@ -73,7 +73,7 @@ export function mapUser(u: any): UserProfile & { isActive?: boolean; lastSignInA
   };
 }
 
-export function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: string | null; model?: string | null; purchaseValue?: number | null; lastPmDate?: string | null; nextPmDate?: string | null } {
+export function mapAsset(a: any): Asset & { serialNumber?: string | null; location?: string | null; model?: string | null; purchaseValue?: number | null; pmRequired?: boolean; lastPmDate?: string | null; nextPmDate?: string | null } {
   return {
     id: a.id,
     assetTag: a.asset_tag,
@@ -89,6 +89,7 @@ export function mapAsset(a: any): Asset & { serialNumber?: string | null; locati
     location: a.location ?? null,
     model: a.model ?? null,
     purchaseValue: a.purchase_value ?? null,
+    pmRequired: a.pm_required ?? true,
     lastPmDate: a.last_pm_date ?? null,
     nextPmDate: a.next_pm_date ?? null,
   };

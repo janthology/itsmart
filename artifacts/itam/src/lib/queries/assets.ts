@@ -4,6 +4,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabase';
+import { pmIsOverdue, todayInManila } from '../maintenance';
 import type {
   Asset, AssetListResponse,
   CreateAssetRequest, UpdateAssetRequest,
@@ -100,6 +101,7 @@ export function useCreateAsset() {
         model: (data as any).model ?? null,
         last_pm_date: (data as any).lastPmDate || null,
         next_pm_date: (data as any).nextPmDate || null,
+        pm_required: (data as any).pmRequired ?? true,
       }).select().single();
       if (error) throw error;
       return row;
@@ -237,27 +239,11 @@ export function useGetAssetAnomalies() {
       const thirtyDaysAgo = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString();
       const oneYearAgo = new Date(now - 365 * 24 * 60 * 60 * 1000).toISOString();
 
-      const [assetsRes, historyRes, statusHistoryRes] = await Promise.all([
-        supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at, last_pm_date, next_pm_date'),
-        supabase.from('asset_history')
-          .select('asset_id, action, created_at')
-          .in('action', ['assigned', 'unassigned'])
-          .gte('created_at', thirtyDaysAgo),
-        // When each asset entered its current status (for duration-based
-        // rules); updated_at alone also moves on unrelated edits.
-        supabase.from('asset_history')
-          .select('asset_id, new_value, created_at')
-          .eq('action', 'status_changed')
-          .order('created_at', { ascending: false }),
+      const [assets, history, statusHistory] = await Promise.all([
+        fetchAllRows<any>(() => supabase.from('assets').select('id, asset_tag, name, status, category, purchase_date, updated_at, last_pm_date, next_pm_date, pm_required').order('id')),
+        fetchAllRows<any>(() => supabase.from('asset_history').select('id, asset_id, action, created_at').in('action', ['assigned', 'unassigned']).gte('created_at', thirtyDaysAgo).order('created_at').order('id')),
+        fetchAllRows<any>(() => supabase.from('asset_history').select('id, asset_id, new_value, created_at').eq('action', 'status_changed').order('created_at', { ascending: false }).order('id', { ascending: false })),
       ]);
-
-      if (assetsRes.error) throw assetsRes.error;
-      if (historyRes.error) throw historyRes.error;
-      if (statusHistoryRes.error) throw statusHistoryRes.error;
-
-      const assets = assetsRes.data ?? [];
-      const history = historyRes.data ?? [];
-      const statusHistory = statusHistoryRes.data ?? [];
       const statusSince = (asset: any) => {
         const latestChange = statusHistory.find((h: any) => h.asset_id === asset.id);
         if (latestChange && latestChange.new_value === asset.status) return latestChange.created_at;
@@ -321,12 +307,9 @@ export function useGetAssetAnomalies() {
         }
 
         // 5. PM overdue: last_pm_date is more than 12 months ago, or next_pm_date is in the past
-        if (asset.status !== 'retired') {
-          const pmOverdue = asset.next_pm_date
-            ? new Date(asset.next_pm_date).getTime() < now
-            : asset.last_pm_date
-            ? new Date(asset.last_pm_date).getTime() < new Date(now - 365 * 24 * 60 * 60 * 1000).getTime()
-            : false;
+        if (asset.status !== 'retired' && asset.pm_required) {
+          const pmOverdue = pmIsOverdue(asset.next_pm_date, todayInManila());
+          if (!asset.next_pm_date) anomalies.push({ assetId: asset.id, assetTag: asset.asset_tag, assetName: asset.name, type: 'pm_overdue', severity: 'warning', message: 'Preventive maintenance schedule not set' });
           if (pmOverdue) {
             const msg = asset.next_pm_date
               ? `Preventive maintenance was due on ${new Date(asset.next_pm_date).toLocaleDateString()}`
@@ -378,6 +361,7 @@ export interface MaintenanceLogEntry {
   assetId: string;
   performedBy: { id: string; fullName: string } | null;
   performedAt: string;
+  maintenanceType: 'preventive' | 'corrective' | null;
   description: string | null;
   createdBy: { id: string; fullName: string } | null;
   createdAt: string;
@@ -404,6 +388,7 @@ export function useGetMaintenanceLog(assetId: string) {
         assetId: r.asset_id,
         performedBy: r.performed_by_profile ? { id: r.performed_by_profile.id, fullName: r.performed_by_profile.full_name } : null,
         performedAt: r.performed_at,
+        maintenanceType: r.maintenance_type,
         description: r.description ?? null,
         createdBy: r.created_by_profile ? { id: r.created_by_profile.id, fullName: r.created_by_profile.full_name } : null,
         createdAt: r.created_at,
@@ -415,22 +400,49 @@ export function useGetMaintenanceLog(assetId: string) {
 export function useAddMaintenanceLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ assetId, performedById, performedAt, description }: {
-      assetId: string; performedById?: string; performedAt: string; description?: string;
+    mutationFn: async ({ assetId, performedById, performedAt, description, maintenanceType, nextPmDate, requestId }: {
+      assetId: string; performedById: string; performedAt: string; description: string;
+      maintenanceType: 'preventive' | 'corrective'; nextPmDate: string | null; requestId: string;
     }) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      const { error } = await supabase.from('asset_maintenance_log').insert({
-        asset_id: assetId,
-        performed_by: performedById ?? null,
-        performed_at: performedAt,
-        description: description ?? null,
-        created_by: user?.id ?? null,
+      const { error } = await supabase.rpc('record_asset_maintenance', {
+        p_asset_id: assetId, p_type: maintenanceType, p_performed_at: performedAt,
+        p_performed_by: performedById, p_description: description, p_next_pm_date: nextPmDate, p_request_id: requestId,
       });
       if (error) throw error;
     },
     onSuccess: (_d, { assetId }) => {
       qc.invalidateQueries({ queryKey: ['maintenanceLog', assetId] });
       qc.invalidateQueries({ queryKey: ['asset', assetId] });
+      qc.invalidateQueries({ queryKey: ['assets'] });
+      qc.invalidateQueries({ queryKey: ['assetHistory', assetId] });
+      qc.invalidateQueries({ queryKey: ['assetAnomalies'] });
+    },
+  });
+}
+
+export function useUpdatePmSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ assetId, lastDate, nextDate, required, expectedLast, expectedNext, expectedRequired }: { assetId: string; lastDate: string | null; nextDate: string | null; required: boolean; expectedLast: string | null; expectedNext: string | null; expectedRequired: boolean }) => {
+      const { error } = await supabase.rpc('update_asset_pm_schedule', { p_asset_id: assetId, p_last: lastDate, p_next: nextDate, p_required: required, p_expected_last: expectedLast, p_expected_next: expectedNext, p_expected_required: expectedRequired });
+      if (error) throw error;
+    },
+    onSuccess: (_d, { assetId }) => {
+      for (const queryKey of [['asset', assetId], ['assets'], ['assetHistory', assetId], ['assetAnomalies']]) qc.invalidateQueries({ queryKey });
+    },
+  });
+}
+
+export function useCorrectMaintenanceLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ logId, performer, description, reason }: { assetId: string; logId: string; performer: string; description: string; reason: string }) => {
+      const { error } = await supabase.rpc('correct_asset_maintenance', { p_log_id: logId, p_performed_by: performer, p_description: description, p_reason: reason });
+      if (error) throw error;
+    },
+    onSuccess: (_d, { assetId }) => {
+      qc.invalidateQueries({ queryKey: ['maintenanceLog', assetId] });
+      qc.invalidateQueries({ queryKey: ['assetHistory', assetId] });
     },
   });
 }

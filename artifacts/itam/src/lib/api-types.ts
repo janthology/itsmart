@@ -36,6 +36,7 @@ export interface Asset {
   location?: string | null;
   model?: string | null;
   purchaseValue?: number | null;
+  pmRequired?: boolean;
   lastPmDate?: string | null;
   nextPmDate?: string | null;
 }

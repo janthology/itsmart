@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, useGetMaintenanceLog, useAddMaintenanceLog, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
+import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, useGetMaintenanceLog, useAddMaintenanceLog, useUpdatePmSchedule, useCorrectMaintenanceLog, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -14,7 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Loader2, ArrowLeft, ArchiveX, Edit2, MonitorSmartphone, Calendar, User, Save, UserMinus, History, Wrench, Plus } from "lucide-react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
+import { nextMaintenanceDate, pmIsOverdue, todayInManila } from "@/lib/maintenance";
 import { z } from "zod";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -33,8 +34,6 @@ type UpdateAssetForm = {
   status: AssetStatus;
   purchaseDate?: string | null;
   purchaseValue?: number | null;
-  lastPmDate?: string | null;
-  nextPmDate?: string | null;
   notes?: string | null;
 };
 
@@ -47,8 +46,6 @@ const updateAssetSchema: z.ZodType<UpdateAssetForm> = z.object({
   status: z.enum(['active','inactive','maintenance','retired'] as const),
   purchaseDate: z.string().optional().nullable(),
   purchaseValue: z.coerce.number().optional().nullable(),
-  lastPmDate: z.string().optional().nullable(),
-  nextPmDate: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
@@ -57,6 +54,7 @@ export default function AssetDetail() {
   const id = params?.id || "";
   const { user } = useAuth();
   const isAdmin = user?.role === 'administrator';
+  const canMaintain = isAdmin || user?.role === 'support_staff';
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
@@ -81,6 +79,15 @@ export default function AssetDetail() {
   const addHistory = useAddAssetHistory();
   const { data: maintenanceLog = [], isLoading: maintenanceLoading } = useGetMaintenanceLog(id);
   const addMaintenance = useAddMaintenanceLog();
+  const updateSchedule = useUpdatePmSchedule();
+  const correctMaintenance = useCorrectMaintenanceLog();
+  const [correction, setCorrection] = useState<{ id: string; performer: string; description: string; reason: string } | null>(null);
+  const [scheduleLastDate, setScheduleLastDate] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleRequired, setScheduleRequired] = useState(true);
+  const [maintenanceType, setMaintenanceType] = useState<"preventive" | "corrective">("preventive");
+  const [proposedNextDate, setProposedNextDate] = useState("");
+  const requestRef = useRef<{ payload: string; id: string } | null>(null);
 
   const [newPmDate, setNewPmDate] = useState("");
   const [newPmPerformedBy, setNewPmPerformedBy] = useState("");
@@ -88,6 +95,14 @@ export default function AssetDetail() {
   const [addingPm, setAddingPm] = useState(false);
 
   const a = asset as any;
+  useEffect(() => {
+    setScheduleLastDate(a?.lastPmDate ?? "");
+    setScheduleDate(a?.nextPmDate ?? "");
+    setScheduleRequired(a?.pmRequired !== false);
+  }, [a?.lastPmDate, a?.nextPmDate, a?.pmRequired, id]);
+  useEffect(() => {
+    setProposedNextDate(newPmDate ? nextMaintenanceDate(newPmDate, asset?.category ?? 'other') : '');
+  }, [newPmDate, asset?.category]);
 
   const form = useForm<UpdateAssetForm>({
     resolver: zodResolver(updateAssetSchema),
@@ -100,8 +115,6 @@ export default function AssetDetail() {
       status: asset.status as AssetStatus,
       purchaseDate: asset.purchaseDate ?? "",
       purchaseValue: a.purchaseValue ?? null,
-      lastPmDate: a.lastPmDate ?? "",
-      nextPmDate: a.nextPmDate ?? "",
       notes: asset.notes ?? "",
     } : undefined,
   });
@@ -120,8 +133,6 @@ export default function AssetDetail() {
           ['status', 'Status', asset.status],
           ['purchaseDate', 'Purchase Date', asset.purchaseDate ?? ''],
           ['purchaseValue', 'Purchase Value', a.purchaseValue != null ? String(a.purchaseValue) : ''],
-          ['lastPmDate', 'Last PM Date', a.lastPmDate ?? ''],
-          ['nextPmDate', 'Next PM Date', a.nextPmDate ?? ''],
           ['notes', 'Notes', asset.notes ?? ''],
         ];
         for (const [key, label, oldVal] of fieldMap) {
@@ -129,9 +140,9 @@ export default function AssetDetail() {
           if (newVal !== String(oldVal)) changes.push({ fieldName: label, oldValue: oldVal, newValue: newVal });
         }
       }
-      // If status changed to inactive/maintenance/retired, fold the unassign into
+      // If status changed to inactive/retired, fold the unassign into
       // the same update call to avoid a redundant round-trip.
-      const needsUnassign = ['inactive', 'maintenance', 'retired'].includes(values.status) && !!asset?.assignedTo;
+      const needsUnassign = ['inactive', 'retired'].includes(values.status) && !!asset?.assignedTo;
       const updatePayload: any = { ...values, ...(needsUnassign ? { assignedToId: null } : {}) };
       await updateMutation.mutateAsync({ id, data: updatePayload });
       if (needsUnassign) {
@@ -211,41 +222,43 @@ export default function AssetDetail() {
     }
   };
 
-  // PM interval in months by category
-  const PM_INTERVAL_MONTHS: Record<string, number> = {
-    server: 3, networking: 3,
-    laptop: 6, desktop: 6, printer: 6,
-    monitor: 12, phone: 12, tablet: 12, peripheral: 12, other: 12,
-  };
-
   const handleAddMaintenance = async () => {
-    if (!newPmDate) return;
+    if (!newPmDate || !newPmPerformedBy || !newPmDescription.trim()) return;
+    const backdated = maintenanceType === 'preventive' && a.lastPmDate && newPmDate < a.lastPmDate;
+    const payload = JSON.stringify([id, maintenanceType, newPmDate, newPmPerformedBy, newPmDescription.trim(), backdated ? null : proposedNextDate]);
+    if (requestRef.current?.payload !== payload) requestRef.current = { payload, id: crypto.randomUUID() };
     setAddingPm(true);
     try {
-      // Calculate next PM date based on category interval
-      const intervalMonths = PM_INTERVAL_MONTHS[asset?.category ?? 'other'] ?? 6;
-      const nextDate = new Date(newPmDate);
-      nextDate.setMonth(nextDate.getMonth() + intervalMonths);
-      const nextPmDateStr = nextDate.toISOString().split('T')[0];
-
       await addMaintenance.mutateAsync({
-        assetId: id,
-        performedById: newPmPerformedBy || undefined,
-        performedAt: newPmDate,
-        description: newPmDescription || undefined,
+        assetId: id, performedById: newPmPerformedBy, performedAt: newPmDate,
+        description: newPmDescription.trim(), maintenanceType,
+        nextPmDate: maintenanceType === 'preventive' && !backdated ? proposedNextDate : null,
+        requestId: requestRef.current.id,
       });
-      // Update last_pm_date and next_pm_date on the asset
-      await updateMutation.mutateAsync({ id, data: { lastPmDate: newPmDate, nextPmDate: nextPmDateStr } as any });
-      await addHistory.mutateAsync({ assetId: id, action: 'pm_recorded', fieldName: 'Last PM Date', oldValue: a.lastPmDate ?? '', newValue: newPmDate });
-      await addHistory.mutateAsync({ assetId: id, action: 'pm_scheduled', fieldName: 'Next PM Date', oldValue: a.nextPmDate ?? '', newValue: nextPmDateStr });
-      toast({ title: "Maintenance logged", description: `PM recorded. Next PM scheduled for ${nextDate.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' })}.` });
+      toast({ title: "Maintenance logged", description: backdated ? "Historical entry saved; the current PM schedule was not changed." : "Maintenance record saved." });
+      requestRef.current = null;
       setNewPmDate(""); setNewPmPerformedBy(""); setNewPmDescription("");
-      queryClient.invalidateQueries({ queryKey: ['asset', id] });
     } catch (error: any) {
       toast({ variant: "destructive", title: "Error", description: error.message || "Failed to log maintenance." });
-    } finally {
-      setAddingPm(false);
+    } finally { setAddingPm(false); }
+  };
+
+  const handleSaveSchedule = async () => {
+    try {
+      await updateSchedule.mutateAsync({ assetId: id, lastDate: scheduleLastDate || null, nextDate: scheduleRequired ? scheduleDate || null : null, required: scheduleRequired, expectedLast: a.lastPmDate ?? null, expectedNext: a.nextPmDate ?? null, expectedRequired: a.pmRequired !== false });
+      toast({ title: "PM schedule updated" });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Could not update PM schedule", description: error.message });
     }
+  };
+
+  const handleCorrection = async () => {
+    if (!correction) return;
+    try {
+      await correctMaintenance.mutateAsync({ assetId: id, logId: correction.id, performer: correction.performer, description: correction.description, reason: correction.reason });
+      setCorrection(null);
+      toast({ title: "Maintenance record corrected", description: "The correction is recorded in asset history." });
+    } catch (error: any) { toast({ variant: "destructive", title: "Correction failed", description: error.message }); }
   };
 
   if (isLoading) return <AppLayout><div className="flex h-64 items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div></AppLayout>;
@@ -406,12 +419,6 @@ export default function AssetDetail() {
                       <FormField control={form.control} name="purchaseValue" render={({ field }) => (
                         <FormItem><FormLabel>Purchase Value (₱)</FormLabel><FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                       )} />
-                      <FormField control={form.control} name="lastPmDate" render={({ field }) => (
-                        <FormItem><FormLabel>Last PM Date</FormLabel><FormControl><DateInput {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
-                      )} />
-                      <FormField control={form.control} name="nextPmDate" render={({ field }) => (
-                        <FormItem><FormLabel>Next PM Date</FormLabel><FormControl><DateInput {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
-                      )} />
                     </div>
                     <FormField control={form.control} name="notes" render={({ field }) => (
                       <FormItem><FormLabel>Notes</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} className="rounded-xl min-h-[100px]" /></FormControl><FormMessage /></FormItem>
@@ -433,11 +440,11 @@ export default function AssetDetail() {
                     { label: "Location", value: a.location || null },
                     { label: "Purchase date", value: asset.purchaseDate ? format(new Date(asset.purchaseDate), 'MMM d, yyyy') : null },
                     { label: "Purchase value", value: a.purchaseValue != null ? `₱${Number(a.purchaseValue).toLocaleString()}` : null },
-                    { label: "Last PM", value: a.lastPmDate ? format(new Date(a.lastPmDate), 'MMM d, yyyy') : null },
+                    { label: "Last PM", value: a.lastPmDate ? format(parseISO(a.lastPmDate), 'MMM d, yyyy') : null },
                     {
                       label: "Next PM",
-                      value: a.nextPmDate ? format(new Date(a.nextPmDate), 'MMM d, yyyy') : null,
-                      warn: a.nextPmDate && new Date(a.nextPmDate) < new Date(),
+                      value: a.nextPmDate ? format(parseISO(a.nextPmDate), 'MMM d, yyyy') : null,
+                      warn: a.pmRequired && pmIsOverdue(a.nextPmDate),
                     },
                   ].map(({ label, value, mono, warn }) => (
                     <div key={label} className="rounded-xl border border-border/50 bg-muted/15 px-4 py-3">
@@ -477,6 +484,7 @@ export default function AssetDetail() {
                           created:         '✅ Created',
                           retired:         '📦 Retired',
                           retire_remarks:  '💬 Retirement Remarks',
+                          maintenance_corrected: '✏️ Maintenance Corrected',
                           pm_recorded:     '🔧 PM Recorded',
                           pm_scheduled:    '📅 PM Scheduled',
                         };
@@ -518,30 +526,44 @@ export default function AssetDetail() {
               ) : null}
               {activeTab === "maintenance" && (
                 <div className="space-y-5">
-                  {/* Add new PM record — admin only */}
-                  {isAdmin && (
+                  {/* The same schedule and log controls are available to support staff. */}
+                  {canMaintain && (
+                    <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-3">
+                      <p className="text-sm font-semibold">Preventive maintenance schedule</p>
+                      <div><Label htmlFor="schedule-last-date">Last PM date</Label><DateInput id="schedule-last-date" max={todayInManila()} value={scheduleLastDate} onChange={e => setScheduleLastDate(e.target.value)} /></div>
+                      <p className="text-xs text-muted-foreground">Date corrections are recorded in asset history. To record completed work, use Log Maintenance below.</p>
+                      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={scheduleRequired} onChange={e => setScheduleRequired(e.target.checked)} /> PM required</label>
+                      {scheduleRequired && <div><Label htmlFor="schedule-date">Next PM date</Label><DateInput id="schedule-date" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)} /></div>}
+                      <Button size="sm" variant="outline" disabled={updateSchedule.isPending || scheduleLastDate > todayInManila() || (scheduleRequired && (!scheduleDate || (!!scheduleLastDate && scheduleDate <= scheduleLastDate)))} onClick={handleSaveSchedule}>Save schedule</Button>
+                    </div>
+                  )}
+                  {canMaintain && (
                     <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-3">
                       <p className="text-sm font-semibold text-foreground flex items-center gap-2"><Plus className="w-4 h-4 text-primary" /> Log Maintenance</p>
+                      <div className="space-y-1"><Label htmlFor="maintenance-type">Maintenance type</Label>
+                        <select id="maintenance-type" value={maintenanceType} onChange={e => setMaintenanceType(e.target.value as "preventive" | "corrective")} className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm"><option value="preventive">Preventive maintenance</option><option value="corrective">Corrective / repair</option></select>
+                      </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground">Date Performed</label>
-                          <DateInput value={newPmDate} onChange={e => setNewPmDate(e.target.value)} className="rounded-xl h-9 text-sm" />
+                          <label htmlFor="pm-performed-date" className="text-xs font-medium text-muted-foreground">Date Performed *</label>
+                          <DateInput id="pm-performed-date" max={todayInManila()} value={newPmDate} onChange={e => setNewPmDate(e.target.value)} className="rounded-xl h-9 text-sm" />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-xs font-medium text-muted-foreground">Performed By</label>
-                          <select value={newPmPerformedBy} onChange={e => setNewPmPerformedBy(e.target.value)}
+                          <label htmlFor="pm-performer" className="text-xs font-medium text-muted-foreground">Performed By *</label>
+                          <select id="pm-performer" value={newPmPerformedBy} onChange={e => setNewPmPerformedBy(e.target.value)}
                             className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm">
                             <option value="">Select staff...</option>
-                            {(allUsers ?? []).filter(u => u.role === 'support_staff' || u.role === 'administrator').map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                            {(allUsers ?? []).filter(u => (u.role === 'support_staff' || u.role === 'administrator') && (u as { isActive?: boolean }).isActive !== false).map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
                           </select>
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-medium text-muted-foreground">Description / Notes</label>
-                        <Textarea value={newPmDescription} onChange={e => setNewPmDescription(e.target.value)}
+                        <label htmlFor="pm-description" className="text-xs font-medium text-muted-foreground">Work description *</label>
+                        <Textarea id="pm-description" value={newPmDescription} onChange={e => setNewPmDescription(e.target.value)}
                           placeholder="What was done during this maintenance..." className="rounded-xl min-h-[70px] text-sm resize-none" />
                       </div>
-                      <Button size="sm" className="rounded-xl" disabled={!newPmDate || addingPm} onClick={handleAddMaintenance}>
+                      {maintenanceType === 'preventive' && newPmDate && (a.lastPmDate && newPmDate < a.lastPmDate ? <p className="text-xs text-muted-foreground">Historical entry: the current PM schedule will not change.</p> : <div><Label htmlFor="pm-next-date">Next PM date *</Label><DateInput id="pm-next-date" value={proposedNextDate} onChange={e => setProposedNextDate(e.target.value)} /></div>)}
+                      <Button size="sm" className="rounded-xl" disabled={!newPmDate || !newPmPerformedBy || !newPmDescription.trim() || newPmDate > todayInManila() || (maintenanceType === 'preventive' && !(a.lastPmDate && newPmDate < a.lastPmDate) && (!proposedNextDate || proposedNextDate <= newPmDate)) || addingPm} onClick={handleAddMaintenance}>
                         {addingPm ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Plus className="w-3 h-3 mr-2" />} Add Record
                       </Button>
                     </div>
@@ -562,13 +584,22 @@ export default function AssetDetail() {
                           <div className="bg-muted/30 rounded-xl border border-border/50 p-4 space-y-1.5">
                             <div className="flex items-center justify-between gap-2 flex-wrap">
                               <span className="font-semibold text-sm text-foreground flex items-center gap-1.5">
-                                <Wrench className="w-3.5 h-3.5 text-blue-500" /> Preventive Maintenance
+                                <Wrench className="w-3.5 h-3.5 text-blue-500" /> {entry.maintenanceType === "preventive" ? "Preventive Maintenance" : entry.maintenanceType === "corrective" ? "Corrective / Repair" : "Maintenance (legacy)"}
                               </span>
-                              <span className="text-xs text-muted-foreground">{format(new Date(entry.performedAt), 'MMM d, yyyy')}</span>
+                              <span className="text-xs text-muted-foreground">{format(parseISO(entry.performedAt), 'MMM d, yyyy')}</span>
                             </div>
                             {entry.performedBy && <p className="text-xs text-muted-foreground">Performed by <span className="font-medium text-foreground">{entry.performedBy.fullName}</span></p>}
                             {entry.description && <p className="text-sm text-foreground/80 mt-1">{entry.description}</p>}
                             {entry.createdBy && <p className="text-[10px] text-muted-foreground/60">Logged by {entry.createdBy.fullName}</p>}
+                            {isAdmin && correction?.id !== entry.id && <Button size="sm" variant="outline" onClick={() => setCorrection({ id: entry.id, performer: entry.performedBy?.id ?? '', description: entry.description ?? '', reason: '' })}>Correct details</Button>}
+                            {isAdmin && correction?.id === entry.id && <div className="space-y-2 border-t pt-2">
+                              <p className="text-xs text-muted-foreground">Corrections are recorded in asset history. Date and type cannot be changed here.</p>
+                              <Label htmlFor={`correct-performer-${entry.id}`}>Performer</Label>
+                              <select id={`correct-performer-${entry.id}`} value={correction.performer} onChange={e => setCorrection({ ...correction, performer: e.target.value })} className="w-full h-9 rounded-xl border border-input bg-background px-3 text-sm"><option value="">Select staff...</option>{(allUsers ?? []).filter(u => (u.role === 'support_staff' || u.role === 'administrator') && (u as { isActive?: boolean }).isActive !== false).map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}</select>
+                              <Label htmlFor={`correct-description-${entry.id}`}>Work description</Label><Textarea id={`correct-description-${entry.id}`} value={correction.description} onChange={e => setCorrection({ ...correction, description: e.target.value })} />
+                              <Label htmlFor={`correct-reason-${entry.id}`}>Reason for correction</Label><Textarea id={`correct-reason-${entry.id}`} value={correction.reason} onChange={e => setCorrection({ ...correction, reason: e.target.value })} />
+                              <div className="flex gap-2"><Button size="sm" disabled={correctMaintenance.isPending || !correction.performer || !correction.description.trim() || !correction.reason.trim()} onClick={handleCorrection}>Save correction</Button><Button size="sm" variant="outline" onClick={() => setCorrection(null)}>Cancel</Button></div>
+                            </div>}
                           </div>
                         </div>
                       ))}
@@ -603,9 +634,9 @@ export default function AssetDetail() {
                 )}
                 {isAdmin && (
                   <div className="space-y-2 pt-2 border-t border-border/50">
-                    {asset.status === 'retired' ? (
+                    {asset.status === 'retired' || asset.status === 'maintenance' ? (
                       <p className="text-xs text-muted-foreground italic text-center py-1">
-                        Assignment is locked for retired assets.
+                        Assignment is locked while retired or in maintenance. Return the asset to service before reassignment.
                       </p>
                     ) : (
                       <>

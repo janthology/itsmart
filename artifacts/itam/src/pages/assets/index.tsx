@@ -37,8 +37,10 @@ const createAssetSchema = z.object({
   purchaseValue: z.coerce.number().optional().nullable(),
   lastPmDate: z.string().optional().nullable(),
   nextPmDate: z.string().optional().nullable(),
+  pmRequired: z.boolean(),
   notes: z.string().optional().nullable(),
-});
+}).refine(v => !v.pmRequired || !!v.nextPmDate, { path: ['nextPmDate'], message: 'Set the next PM date or mark PM not required' })
+  .refine(v => !v.pmRequired || !v.lastPmDate || !v.nextPmDate || v.nextPmDate > v.lastPmDate, { path: ['nextPmDate'], message: 'Next PM must be after Last PM' });
 
 export default function AssetsList() {
   const { user } = useAuth();
@@ -60,7 +62,7 @@ export default function AssetsList() {
     defaultValues: {
       assetTag: "", name: "", model: "", serialNumber: "", location: "",
       category: "laptop" as AssetCategory, status: "active" as AssetStatus,
-      purchaseDate: "", purchaseValue: null, lastPmDate: "", nextPmDate: "", notes: "",
+      purchaseDate: "", purchaseValue: null, lastPmDate: "", nextPmDate: "", pmRequired: true, notes: "",
     },
   });
 
@@ -144,7 +146,7 @@ export default function AssetsList() {
   );
   const onSubmit = async (values: z.infer<typeof createAssetSchema>) => {
     try {
-      const newAsset = await createMutation.mutateAsync({ data: values as any });
+      const newAsset = await createMutation.mutateAsync({ data: { ...values, nextPmDate: values.pmRequired ? values.nextPmDate : null } as any });
       // Log creation event
       if (newAsset?.id) {
         await addHistory.mutateAsync({
@@ -285,8 +287,11 @@ export default function AssetsList() {
                             <FormField control={form.control} name="lastPmDate" render={({ field }) => (
                               <FormItem><FormLabel>Last PM Date</FormLabel><FormControl><DateInput {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                             )} />
+                            <FormField control={form.control} name="pmRequired" render={({ field }) => (
+                              <FormItem className="col-span-2"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={field.value} onChange={e => field.onChange(e.target.checked)} /> Preventive maintenance required</label></FormItem>
+                            )} />
                             <FormField control={form.control} name="nextPmDate" render={({ field }) => (
-                              <FormItem><FormLabel>Next PM Date</FormLabel><FormControl><DateInput {...field} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
+                              <FormItem><FormLabel>Next PM Date</FormLabel><FormControl><DateInput {...field} disabled={!form.watch("pmRequired")} value={field.value ?? ''} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                             )} />
                           </div>
                           <FormField control={form.control} name="notes" render={({ field }) => (

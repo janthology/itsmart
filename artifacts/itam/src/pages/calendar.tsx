@@ -107,7 +107,7 @@ export default function CalendarPage() {
     if (isAdmin || isSupport) {
       for (const a of assets) {
         const asset = a as { nextPmDate?: string; purchaseDate?: string; name: string; assetTag: string; id: string; category: string; status: string };
-        if (asset.nextPmDate) {
+        if (asset.nextPmDate && a.status !== "retired" && (asset as { pmRequired?: boolean }).pmRequired !== false) {
           evts.push({
             id: `a-pm-${a.id}`,
             date: parseISO(asset.nextPmDate),
