@@ -446,3 +446,16 @@ export function useCorrectMaintenanceLog() {
     },
   });
 }
+
+export function useReturnAssetToService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (assetId: string) => {
+      const { error } = await supabase.rpc('return_asset_to_service', { p_asset_id: assetId });
+      if (error) throw error;
+    },
+    onSuccess: (_d, assetId) => {
+      for (const queryKey of [['asset', assetId], ['assets'], ['assetHistory', assetId], ['assetAnomalies']]) qc.invalidateQueries({ queryKey });
+    },
+  });
+}

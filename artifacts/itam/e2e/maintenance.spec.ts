@@ -10,13 +10,13 @@ const people = [
   { id: generalId, full_name: 'Test User', role: 'general_user', is_active: true },
 ];
 
-async function setup(page: Page, role: 'administrator' | 'support_staff' | 'general_user') {
+async function setup(page: Page, role: 'administrator' | 'support_staff' | 'general_user', status = 'active') {
   const person = people.find(p => p.role === role)!;
   const user = { id: person.id, email: 'test@example.test', created_at: '2025-01-01T00:00:00Z', app_metadata: { role }, user_metadata: { full_name: person.full_name }, aud: 'authenticated', role: 'authenticated' };
   const token = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ sub: user.id, exp: 4102444800 })).toString('base64url')}.signature`;
   await page.addInitScript(({ user, token }) => localStorage.setItem('sb-example-auth-token', JSON.stringify({ access_token: token, refresh_token: 'test', expires_in: 3600, expires_at: 4102444800, token_type: 'bearer', user })), { user, token });
   const requests: { path: string; body: any }[] = [];
-  const asset = { id: assetId, asset_tag: 'TEST-001', name: 'Test laptop', category: 'laptop', status: 'active', assigned_to: generalId, assigned_to_profile: people[2], last_pm_date: '2025-01-01', next_pm_date: '2025-07-01', pm_required: true, created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z' };
+  const asset = { id: assetId, asset_tag: 'TEST-001', name: 'Test laptop', category: 'laptop', status, assigned_to: generalId, assigned_to_profile: people[2], last_pm_date: '2025-01-01', next_pm_date: '2025-07-01', pm_required: true, created_at: '2025-01-01T00:00:00Z', updated_at: '2025-01-01T00:00:00Z' };
   await page.route('**/*', async route => {
     const req = route.request(); const url = new URL(req.url());
     if (url.hostname === '127.0.0.1' || url.hostname === 'localhost') return route.continue();
@@ -94,4 +94,11 @@ test('admins can submit a reasoned correction to a maintenance record', async ({
   await page.getByLabel('Reason for correction').fill('Clarify work');
   await page.getByRole('button', { name: 'Save correction' }).click();
   await expect.poll(() => requests.find(r => r.path.endsWith('/correct_asset_maintenance'))?.body).toMatchObject({ p_description: 'Cleaned fan', p_reason: 'Clarify work' });
+});
+
+
+test('only admins can return a maintained asset to service', async ({ page }) => {
+  const requests = await setup(page, 'administrator', 'maintenance');
+  await page.getByRole('button', { name: 'Return to service' }).click();
+  await expect.poll(() => requests.find(r => r.path.endsWith('/return_asset_to_service'))?.body).toMatchObject({ p_asset_id: assetId });
 });

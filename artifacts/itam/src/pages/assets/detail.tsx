@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useRoute, Link } from "wouter";
-import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, useGetMaintenanceLog, useAddMaintenanceLog, useUpdatePmSchedule, useCorrectMaintenanceLog, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
+import { useGetAsset, useUpdateAsset, useGetUsers, useGetAssetHistory, useAddAssetHistory, useGetMaintenanceLog, useAddMaintenanceLog, useUpdatePmSchedule, useCorrectMaintenanceLog, useReturnAssetToService, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -80,6 +80,7 @@ export default function AssetDetail() {
   const { data: maintenanceLog = [], isLoading: maintenanceLoading } = useGetMaintenanceLog(id);
   const addMaintenance = useAddMaintenanceLog();
   const updateSchedule = useUpdatePmSchedule();
+  const returnToService = useReturnAssetToService();
   const correctMaintenance = useCorrectMaintenanceLog();
   const [correction, setCorrection] = useState<{ id: string; performer: string; description: string; reason: string } | null>(null);
   const [scheduleLastDate, setScheduleLastDate] = useState("");
@@ -252,6 +253,13 @@ export default function AssetDetail() {
     }
   };
 
+  const handleReturnToService = async () => {
+    try {
+      await returnToService.mutateAsync(id);
+      toast({ title: "Asset returned to service", description: "The existing assignment was retained." });
+    } catch (error: any) { toast({ variant: "destructive", title: "Could not return asset to service", description: error.message }); }
+  };
+
   const handleCorrection = async () => {
     if (!correction) return;
     try {
@@ -291,6 +299,9 @@ export default function AssetDetail() {
             </div>
             {isAdmin && !isEditing && (
               <div className="flex flex-wrap gap-2 shrink-0">
+                {asset.status === 'maintenance' && (
+                  <Button onClick={handleReturnToService} disabled={returnToService.isPending} className="rounded-xl">Return to service</Button>
+                )}
                 <Button variant="outline" onClick={() => setIsEditing(true)} className="rounded-xl bg-card/80">
                   <Edit2 className="w-4 h-4 mr-2" /> Edit
                 </Button>
