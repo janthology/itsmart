@@ -61,3 +61,20 @@ describe("ticket performance exports", () => {
     ]);
   });
 });
+
+// Known report defects: expected failures turn green only once fixed.
+describe("asset report audit", () => {
+  it.fails("does not claim time since purchase is time spent unassigned", async () => {
+    const { exportUnassignedAssetsXlsx } = await import('./reports');
+    await exportUnassignedAssetsXlsx([{ assetTag: 'A-1', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01' }]);
+    const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
+    expect(row).not.toHaveProperty('Days Unassigned');
+  });
+
+  it.fails("does not export NaN depreciation for a zero-value asset", async () => {
+    const { exportDepreciationXlsx } = await import('./reports');
+    await exportDepreciationXlsx([{ assetTag: 'A-2', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01', purchaseValue: 0 }]);
+    const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
+    expect(Number.isNaN(row['% Depreciated'])).toBe(false);
+  });
+});
