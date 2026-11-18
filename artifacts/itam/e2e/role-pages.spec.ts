@@ -247,21 +247,50 @@ test('audit: a ticket status update can succeed while its activity entry fails',
   await expect(page.getByRole('heading', { name: 'Synthetic ticket' })).toBeVisible();
   await page.getByRole('combobox').first().click();
   await page.getByRole('option', { name: /In progress/i }).click();
-  await expect(page.getByText('Failed to update status.')).toBeVisible();
+  await expect(page.getByText('Failed to update status.', { exact: true })).toBeVisible();
   expect(commentFailed).toBe(true);
   expect(currentStatus).toBe('in_progress');
 });
 
-// Characterization: an error must eventually be rendered separately from an empty report.
-test('audit: report fetch failure is currently displayed as no data', async ({ page }) => {
+test('report fetch failure displays retry and prevents export until recovered', async ({ page }) => {
   await syntheticSession(page, 'general_user');
-  let failures = 0;
+  let fail = true;
   await page.route('**/rest/v1/tickets*', async route => {
+    if (!fail) return route.fallback();
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
-    failures++;
     return route.fulfill({ status: 500, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic report failure' }) });
   });
   await page.goto('/reports');
-  await expect.poll(() => failures).toBeGreaterThan(0);
-  await expect(page.getByText('No data for this report')).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole('alert')).toContainText('Could not load report data.', { timeout: 10000 });
+  await expect(page.getByText('No data for this report')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
+  fail = false;
+  await page.getByRole('button', { name: 'Retry', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toBeEnabled();
 });
+
+for (const item of [
+  { name: 'asset inventory', table: 'assets', button: null, select: null },
+  { name: 'asset history', table: 'asset_history', button: 'History', select: null },
+  { name: 'ticket performance', table: 'tickets', button: 'Performance', select: null },
+  { name: 'user activity', table: 'assets', button: 'User activity', select: 'assigned_to' },
+] as const) {
+  test(`report errors and retry: ${item.name}`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    let fail = true;
+    await page.route(`**/rest/v1/${item.table}*`, async route => {
+      const url = new URL(route.request().url());
+      if (!fail || (item.select && url.searchParams.get('select') !== item.select)) return route.fallback();
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
+      return route.fulfill({ status: 500, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic report failure' }) });
+    });
+    await page.goto('/reports');
+    if (item.button) await page.getByRole('button', { name: new RegExp(item.button, 'i') }).click();
+    await expect(page.getByRole('alert')).toContainText('Could not load report data.', { timeout: 10000 });
+    await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0);
+    fail = false;
+    await page.getByRole('button', { name: 'Retry', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveCount(0);
+  });
+}

@@ -6,6 +6,10 @@ The audit reviewed the checked-in application, Edge Functions and migrations at 
 
 **Test interpretation:** Tests whose names include “characterizes” or “audit” intentionally assert current defective behavior so that the reproductions are durable. A green test run does **not** mean those defects are fixed. When remediating, replace those assertions with the desired behavior.
 
+## Remediation status
+
+A ticket/asset guard migration is prepared but **not deployed**; see `docs/security-remediation-stage-1.md`. The report error-state fix is implemented in the frontend but still needs deployment. All other findings below remain open.
+
 ## Priority findings
 
 ### P1 — Authorization and integrity

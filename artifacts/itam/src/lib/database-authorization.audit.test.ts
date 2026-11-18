@@ -133,3 +133,90 @@ describe('isolated authorization characterization', () => {
   });
 
 });
+
+// Apply the prepared migration to the same isolated model only after the
+// baseline characterizations above. Production remains unchanged.
+describe('prepared ticket and asset write guards', () => {
+  const admin = '00000000-0000-4000-8000-000000000005';
+  const ownResolved = '30000000-0000-4000-8000-000000000001';
+  const ownForReopen = '30000000-0000-4000-8000-000000000002';
+  beforeAll(async () => {
+    const autoClose = source('20261030000004_auto_close_resolved_tickets.sql');
+    await db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);
+      INSERT INTO profiles(id,role,is_active) VALUES ('${admin}','administrator',true);
+      ${functionSql(initial, 'generate_ticket_number')}
+      ${functionSql(initial, 'update_updated_at_column')}
+      ${functionSql(autoClose, 'touch_ticket_last_activity')}
+      ${functionSql(autoClose, 'touch_ticket_on_comment')}
+      CREATE TABLE public.ticket_comments(id uuid DEFAULT gen_random_uuid(), ticket_id uuid NOT NULL REFERENCES tickets(id), created_by uuid NOT NULL, comment_text text NOT NULL, created_at timestamptz DEFAULT now());
+      GRANT INSERT,SELECT ON public.ticket_comments TO authenticated;
+      CREATE TRIGGER trg_touch_ticket_on_comment AFTER INSERT ON ticket_comments FOR EACH ROW EXECUTE FUNCTION touch_ticket_on_comment();
+      CREATE TRIGGER set_ticket_number BEFORE INSERT ON tickets FOR EACH ROW WHEN (NEW.ticket_number IS NULL) EXECUTE FUNCTION generate_ticket_number();
+      CREATE TRIGGER trg_touch_ticket_last_activity BEFORE INSERT OR UPDATE ON tickets FOR EACH ROW EXECUTE FUNCTION touch_ticket_last_activity();
+      CREATE TRIGGER update_tickets_updated_at BEFORE UPDATE ON tickets FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+      INSERT INTO tickets(id,title,created_by,assigned_to,status,resolved_at) VALUES
+       ('${ownResolved}','Close test','${general}','${support}','resolved',now() - interval '1 hour'),
+       ('${ownForReopen}','Reopen test','${general}','${support}','resolved',now() - interval '1 hour');
+      ${source('20261101000014_ticket_and_asset_write_guards.sql')}
+    `);
+  });
+  it('allows an ordinary open ticket but uses server number and timestamps', async () => {
+    await asUser(general);
+    const result = await db.query(`INSERT INTO tickets(title,created_by,created_at,updated_at,last_activity_at)
+      VALUES ('New',$1,'2020-01-01','2020-01-01','2020-01-01')
+      RETURNING status,assigned_to,ticket_number,created_at = CURRENT_TIMESTAMP AS created_now, last_activity_at = CURRENT_TIMESTAMP AS activity_now`, [general]);
+    expect(result.rows[0]).toMatchObject({ status: 'open', assigned_to: null, created_now: true, activity_now: true });
+    expect((result.rows[0] as { ticket_number: string }).ticket_number).toMatch(/^DOST02-ITS\d{9}$/);
+  });
+  it('rejects crafted ticket inserts, direct timing updates and unrelated edits', async () => {
+    await asUser(general);
+    for (const fields of ["status='resolved'", `assigned_to='${support}'`, "resolved_at=now()", 'satisfaction_rating=5', "ticket_number='fake'"]) {
+      await expect(db.exec(`INSERT INTO tickets(title,created_by,${fields.split('=')[0]}) VALUES ('bad','${general}',${fields.split('=').slice(1).join('=')})`)).rejects.toThrow(/open and unassigned/);
+    }
+    for (const change of ["created_at='2020-01-01'", "resolved_at='2020-01-01'", "closed_at='2020-01-01'", "on_hold_at='2020-01-01'", 'total_hold_seconds=3600', "title='changed'"]) {
+      await expect(db.exec(`UPDATE tickets SET ${change} WHERE id='${ownResolved}'`)).rejects.toThrow(/Forbidden/);
+    }
+    const normalized = await db.query("UPDATE tickets SET last_activity_at='2099-01-01',updated_at='2099-01-01' WHERE id=$1 RETURNING last_activity_at=CURRENT_TIMESTAMP AS activity_now,updated_at=CURRENT_TIMESTAMP AS updated_now", [ownResolved]);
+    expect(normalized.rows).toEqual([{ activity_now: true, updated_now: true }]);
+    expect((await db.query("UPDATE tickets SET status='closed' WHERE created_by=$1 RETURNING id", [other])).rows).toHaveLength(0);
+  });
+  it('keeps legitimate closure, reopen and ratings while using server timestamps', async () => {
+    await asUser(general);
+    const closed = await db.query(`UPDATE tickets SET status='closed', closed_at='2099-01-01', resolved_at='2099-01-01' WHERE id=$1
+      RETURNING status, assigned_to, closed_at = CURRENT_TIMESTAMP AS closed_now, resolved_at < CURRENT_TIMESTAMP AS retained_resolution`, [ownResolved]);
+    expect(closed.rows[0]).toMatchObject({ status: 'closed', assigned_to: support, closed_now: true, retained_resolution: true });
+    const rating = await db.query("UPDATE tickets SET satisfaction_rating=5,satisfaction_comment='ok' WHERE id=$1 RETURNING satisfaction_rating", [ownResolved]);
+    expect(rating.rows).toEqual([{ satisfaction_rating: 5 }]);
+    // The existing security-definer comment trigger must remain compatible
+    // with the creator guard and refresh ticket activity.
+    const comment = await db.query("INSERT INTO ticket_comments(ticket_id,created_by,comment_text) VALUES ($1,$2,'synthetic') RETURNING ticket_id", [ownResolved, general]);
+    expect(comment.rows).toEqual([{ ticket_id: ownResolved }]);
+    const reopened = await db.query("UPDATE tickets SET status='in_progress',resolved_at=NULL WHERE id=$1 RETURNING status,resolved_at,closed_at,assigned_to", [ownForReopen]);
+    expect(reopened.rows[0]).toMatchObject({ status: 'in_progress', resolved_at: null, closed_at: null, assigned_to: support });
+    await expect(db.query("UPDATE tickets SET status='resolved' WHERE id=$1", [ownForReopen])).rejects.toThrow(/only reopen or close/);
+  });
+  it('blocks support from setting initial status or assignment but permits an unassigned active asset', async () => {
+    await asUser(support);
+    await expect(db.query("INSERT INTO assets(status,assigned_to,next_pm_date) VALUES ('retired',NULL,'2099-01-01')")).rejects.toThrow(/Only administrators/);
+    await expect(db.query("INSERT INTO assets(status,assigned_to,next_pm_date) VALUES ('active',$1,'2099-01-01')", [general])).rejects.toThrow(/Only administrators/);
+    expect((await db.query("INSERT INTO assets(status,next_pm_date) VALUES ('active','2099-01-01') RETURNING status,assigned_to")).rows).toEqual([{ status: 'active', assigned_to: null }]);
+  });
+  it('does not change administrator asset insert or support ticket type behavior', async () => {
+    await asUser(admin);
+    expect((await db.query("INSERT INTO assets(status,assigned_to,next_pm_date) VALUES ('retired',$1,'2099-01-01') RETURNING status,assigned_to", [general])).rows[0]).toMatchObject({ status: 'retired', assigned_to: general });
+    await asUser(support);
+    expect((await db.query("UPDATE tickets SET type='hardware_issue' WHERE id=$1 RETURNING type", [ownForReopen])).rows).toEqual([{ type: 'hardware_issue' }]);
+  });
+  it('rollback restores previous guards and removes the new insert trigger', async () => {
+    await db.exec(`RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);`);
+    await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000014_ticket_and_asset_write_guards.sql', import.meta.url), 'utf8'));
+    const triggers = await db.query("SELECT tgname FROM pg_trigger WHERE tgname='a_guard_ticket_insert' AND NOT tgisinternal");
+    expect(triggers.rows).toHaveLength(0);
+    await asUser(general);
+    // Demonstrates rollback behavior only: the original security gap returns.
+    expect((await db.query("UPDATE tickets SET total_hold_seconds=3600 WHERE id=$1 RETURNING total_hold_seconds", [ownForReopen])).rows).toEqual([{ total_hold_seconds: 3600 }]);
+    await asUser(support);
+    expect((await db.query("INSERT INTO assets(status,assigned_to,next_pm_date) VALUES ('retired',$1,'2099-01-01') RETURNING status", [general])).rows).toEqual([{ status: 'retired' }]);
+  });
+
+});

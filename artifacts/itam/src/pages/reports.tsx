@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Loader2, MonitorSmartphone, TicketIcon,
   History, Users, PackageX, TrendingDown, Star, Gauge, BarChart3, Filter,
@@ -91,7 +92,7 @@ export default function Reports() {
   const needsAllTickets = ["ticket_performance", "ticket_satisfaction"].includes(activeId);
   const needsUserActivity = activeId === "user_activity";
 
-  const { data: assetsData, isLoading: assetsLoading } = useGetAssets({
+  const { data: assetsData, isLoading: assetsLoading, isError: assetsError, refetch: refetchAssets } = useGetAssets({
     query: needsAssets ? { status: assetStatus !== "all" ? assetStatus as AssetStatus : undefined } : {},
   });
   const ticketQuery: any = {
@@ -100,10 +101,10 @@ export default function Reports() {
   };
   if (isGeneral) ticketQuery.createdBy = user?.id;
   if (isSupport) ticketQuery.assignedTo = user?.id;
-  const { data: ticketsData, isLoading: ticketsLoading } = useGetTickets({ query: needsTickets ? ticketQuery : {} });
-  const { data: historyData = [], isLoading: historyLoading } = useGetAssetHistoryAll(needsHistory ? { from: histFrom || undefined, to: histTo || undefined } : {});
-  const { data: allTicketsData = [], isLoading: allTicketsLoading } = useGetAllTicketsForReport({ enabled: needsAllTickets });
-  const { data: userActivity = [], isLoading: userActivityLoading } = useGetUserActivity({ enabled: needsUserActivity });
+  const { data: ticketsData, isLoading: ticketsLoading, isError: ticketsError, refetch: refetchTickets } = useGetTickets({ query: needsTickets ? ticketQuery : {} });
+  const { data: historyData = [], isLoading: historyLoading, isError: historyError, refetch: refetchHistory } = useGetAssetHistoryAll(needsHistory ? { from: histFrom || undefined, to: histTo || undefined } : {});
+  const { data: allTicketsData = [], isLoading: allTicketsLoading, isError: allTicketsError, refetch: refetchAllTickets } = useGetAllTicketsForReport({ enabled: needsAllTickets });
+  const { data: userActivity = [], isLoading: userActivityLoading, isError: userActivityError, refetch: refetchUserActivity } = useGetUserActivity({ enabled: needsUserActivity });
 
   // ── Derived ──────────────────────────────────────────────────────────────────
   const assets = useMemo(() => applyDateFilter(assetsData?.data ?? [], assetFrom, assetTo), [assetsData, assetFrom, assetTo]);
@@ -155,6 +156,16 @@ export default function Reports() {
       default: return false;
     }
   }, [activeId, assetsLoading, historyLoading, ticketsLoading, allTicketsLoading, userActivityLoading]);
+
+  // Do not present failed/stale report data as an empty or exportable report.
+  const activeError = needsAssets ? assetsError : needsTickets ? ticketsError : needsHistory ? historyError : needsAllTickets ? allTicketsError : needsUserActivity ? userActivityError : false;
+  const retryActiveReport = () => {
+    if (needsAssets) void refetchAssets();
+    else if (needsTickets) void refetchTickets();
+    else if (needsHistory) void refetchHistory();
+    else if (needsAllTickets) void refetchAllTickets();
+    else if (needsUserActivity) void refetchUserActivity();
+  };
 
   // ── Preview row builders ──────────────────────────────────────────────────────
   const assetPreviewCols = ["Tag", "Name", "Category", "Status", "Serial No.", "Location", "Assigned To", "Purchase Date", "Value (₱)"];
@@ -324,6 +335,8 @@ export default function Reports() {
                             <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                             Loading…
                           </span>
+                        ) : activeError ? (
+                          <span className="text-xs font-medium text-destructive">Data unavailable</span>
                         ) : (
                           <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/[0.08] px-3 py-1 text-xs font-semibold text-primary tabular-nums">
                             {activeCount} record{activeCount === 1 ? "" : "s"}
@@ -345,7 +358,7 @@ export default function Reports() {
                   </div>
 
                   {/* Contextual insight chips */}
-                  {!activeLoading && activeId === "ticket_performance" && perfTickets.length > 0 && (
+                  {!activeLoading && !activeError && activeId === "ticket_performance" && perfTickets.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-5 pt-5 border-t border-border/40">
                       <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 border border-emerald-200/60 font-medium">
                         <CheckCircle2 className="w-3.5 h-3.5" />
@@ -371,7 +384,7 @@ export default function Reports() {
                       </p>
                     </div>
                   )}
-                  {!activeLoading && activeId === "ticket_satisfaction" && avgRating && (
+                  {!activeLoading && !activeError && activeId === "ticket_satisfaction" && avgRating && (
                     <div className="flex items-center gap-3 mt-5 pt-5 border-t border-border/40">
                       <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 ring-1 ring-amber-200/50">
                         <Star className="w-5 h-5 text-amber-500 fill-amber-400" />
@@ -476,6 +489,13 @@ export default function Reports() {
                   </div>
                 )}
 
+                {activeError ? (
+                  <div role="alert" className="rounded-xl border border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
+                    <p className="font-semibold">Could not load report data.</p>
+                    <p className="mt-1">No report can be exported until the data is loaded successfully.</p>
+                    <Button type="button" variant="outline" size="sm" className="mt-3" onClick={retryActiveReport}>Retry</Button>
+                  </div>
+                ) : <>
                 {/* Preview */}
                 <div className="space-y-3">
                   {activeId === "asset_inventory" && (
@@ -545,6 +565,7 @@ export default function Reports() {
                     onXlsx={() => handleExport(() => exportUserActivityXlsx(userActivity))}
                     onPdf={() => handleExport(() => exportUserActivityPdf(userActivity))} />
                 )}
+                </>}
               </div>
             </div>
           </div>
