@@ -28,6 +28,12 @@ Recheck these, relevant triggers, grants and policies immediately before a futur
 
 The test model is a simplified isolated PostgreSQL/PGlite schema that uses the actual old migration functions/policies and applies this prepared migration. It tests denied and allowed writes, trigger order, ordinary ticket generation, CSAT, closure/reopen, the security-definer comment activity trigger, support asset restrictions and retained support ticket Type changes. The rollback file is also executed in that model. It is not a full Supabase/Auth integration test and cannot by itself establish live compatibility or concurrency safety.
 
+## Expanded local schema test
+
+`artifacts/itam/src/lib/full-schema.local.test.ts` starts a disposable in-memory PGlite database, creates synthetic Auth/cron/publication shims, and applies **all repository migration files in order**, including the prepared guard. Six local tests cover ticket permissions, notifications via comment triggers, support maintenance, preventive PM idempotency and retained assignment, return-to-service, cross-user writes, and the rollback. The database contains synthetic data only and is destroyed after the run.
+
+This is stronger than the earlier reduced-schema test, but it is **not** the Supabase stack: Auth is a stub (no GoTrue/JWT authentication), cron schedules do not execute, publication is not real Realtime, and the PostgREST gateway, hosted extensions, concurrent multi-session behavior and cloud configuration are not tested. The repository schema may also differ from live. It is not a backup or a verified restore.
+
 ## Prerequisites and cutover proposal
 
 1. Obtain and verify a restorable backup, including Auth and database data; confirm owner and restoration procedure. Do not treat row counts, migration files or this document as a backup.
