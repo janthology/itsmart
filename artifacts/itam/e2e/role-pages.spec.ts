@@ -367,6 +367,53 @@ test('unconfirmed status update retains the required remarks for recovery', asyn
   expect(comments).toBe(0);
 });
 
+for (const failure of ['cleanup_unconfirmed', 'cleanup_requested', 'lost_response'] as const) {
+  test(`user creation ${failure} warns and blocks an unchecked retry`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    let attempts = 0;
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    await page.route('**/functions/v1/create-user', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      attempts++;
+      if (failure === 'lost_response') return route.abort('failed');
+      return route.fulfill({ status: 500, headers, contentType: 'application/json', body: JSON.stringify({ code: failure, error: 'Synthetic failure', userId: profiles[2].id }) });
+    });
+    await page.goto('/admin/users');
+    await page.getByRole('button', { name: 'Add user' }).click();
+    await page.getByPlaceholder('e.g. Juan dela Cruz').fill('Synthetic New User');
+    await page.getByPlaceholder('name@dost.gov.ph').fill('new@example.test');
+    await page.getByRole('button', { name: 'Create user' }).click();
+    const warning = page.getByRole('alert').filter({ hasText: 'User creation needs review' });
+    await expect(warning).toContainText('new@example.test');
+    await expect(warning).toContainText('before retrying');
+    if (failure !== 'lost_response') await expect(warning).toContainText(profiles[2].id);
+    await expect(page.getByRole('button', { name: 'Create user' })).toBeDisabled();
+    expect(attempts).toBe(1);
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByRole('alert').filter({ hasText: 'User creation needs review' })).toBeVisible();
+    await page.getByRole('button', { name: 'Add user' }).click();
+    await page.getByRole('button', { name: 'I checked; allow retry' }).click();
+    await expect(page.getByRole('button', { name: 'Create user' })).toBeEnabled();
+    expect(attempts).toBe(1);
+  });
+}
+
+test('successful user creation displays the one-time password', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+  await page.route('**/functions/v1/create-user', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify({ success: true, userId: profiles[2].id, temporaryPassword: 'SyntheticPassword2!' }) });
+  });
+  await page.goto('/admin/users');
+  await page.getByRole('button', { name: 'Add user' }).click();
+  await page.getByPlaceholder('e.g. Juan dela Cruz').fill('Synthetic New User');
+  await page.getByPlaceholder('name@dost.gov.ph').fill('new@example.test');
+  await page.getByRole('button', { name: 'Create user' }).click();
+  await expect(page.getByText('SyntheticPassword2!', { exact: true })).toBeVisible();
+  await expect(page.getByRole('alert').filter({ hasText: 'User creation needs review' })).toHaveCount(0);
+});
+
 test('report fetch failure displays retry and prevents export until recovered', async ({ page }) => {
   await syntheticSession(page, 'general_user');
   let fail = true;

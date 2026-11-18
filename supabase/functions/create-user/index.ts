@@ -13,7 +13,8 @@ const VALID_ROLES = new Set(['general_user', 'support_staff', 'administrator'])
 // a CSPRNG with at least one character per class, satisfying the app's
 // password rules. It is returned to the calling administrator exactly once
 // in this response; only its hash is ever stored (by GoTrue), and the
-// account is flagged must_change_password so it cannot be kept. Ambiguous
+// account is flagged must_change_password for the app prompt. This flag is
+// not yet a server-side access boundary. Ambiguous
 // characters (0/O, 1/l/I) are excluded so it can be relayed verbally.
 function generateTemporaryPassword(length = 20): string {
   const sets = [
@@ -156,6 +157,9 @@ Deno.serve(async (req: Request) => {
 
     const normalizedEmail = email.trim().toLowerCase()
     const normalizedName = fullName.trim()
+    if (!normalizedEmail || !normalizedName) {
+      return jsonResponse(400, { error: 'email and fullName are required' })
+    }
     const normalizedDept =
       typeof department === 'string' && department.trim().length > 0
         ? department.trim()
@@ -163,74 +167,96 @@ Deno.serve(async (req: Request) => {
 
     const temporaryPassword = generateTemporaryPassword()
 
-    const createResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
-      method: 'POST',
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        email: normalizedEmail,
-        password: temporaryPassword,
-        email_confirm: true,
-        user_metadata: {
-          full_name: normalizedName,
-          department: normalizedDept,
+    let createResponse: Response
+    try {
+      createResponse = await fetch(`${supabaseUrl}/auth/v1/admin/users`, {
+        method: 'POST',
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          'Content-Type': 'application/json',
         },
-      }),
-    })
-    if (!createResponse.ok) {
-      return jsonResponse(400, {
-        error: await readError(createResponse, 'Failed to create user'),
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: temporaryPassword,
+          email_confirm: true,
+          user_metadata: { full_name: normalizedName, department: normalizedDept },
+        }),
       })
+    } catch {
+      // The request may have committed before the connection was lost.
+      return jsonResponse(503, { code: 'creation_unconfirmed', error: 'User creation could not be confirmed. Check Auth and the user list before retrying.' })
+    }
+    if (!createResponse.ok) {
+      if (createResponse.status >= 500) {
+        return jsonResponse(503, { code: 'creation_unconfirmed', error: 'User creation could not be confirmed. Check Auth and the user list before retrying.' })
+      }
+      return jsonResponse(400, { error: await readError(createResponse, 'Failed to create user') })
     }
 
-    const createdUser = await createResponse.json() as { id?: string }
-    if (!createdUser.id) {
-      return jsonResponse(500, { error: 'Auth user was created without an ID' })
+    let createdUser: { id?: string }
+    try {
+      createdUser = await createResponse.json() as { id?: string }
+    } catch {
+      return jsonResponse(503, { code: 'creation_unconfirmed', error: 'User creation could not be confirmed. Check Auth and the user list before retrying.' })
+    }
+    if (!createdUser.id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(createdUser.id)) {
+      return jsonResponse(503, { code: 'creation_unconfirmed', error: 'User creation could not be confirmed. Check Auth and the user list before retrying.' })
     }
 
     const profileUrl = new URL(`${supabaseUrl}/rest/v1/profiles`)
     profileUrl.searchParams.set('on_conflict', 'id')
-
-    const profileResponse = await fetch(profileUrl, {
-      method: 'POST',
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'resolution=merge-duplicates,return=representation',
-      },
-      body: JSON.stringify({
-        id: createdUser.id,
-        full_name: normalizedName,
-        department: normalizedDept,
-        role: targetRole,
-        is_active: true,
-        must_change_password: true,
-      }),
-    })
-
-    if (!profileResponse.ok) {
-      const profileError = await readError(
-        profileResponse,
-        'Failed to create user profile',
-      )
-
-      // Avoid leaving an orphan auth account if its profile cannot be saved.
-      await fetch(
-        `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(createdUser.id)}`,
-        {
-          method: 'DELETE',
-          headers: {
-            apikey: serviceKey,
-            Authorization: `Bearer ${serviceKey}`,
-          },
+    profileUrl.searchParams.set('select', 'id,role,is_active,must_change_password')
+    let profileConfirmed = false
+    try {
+      const profileResponse = await fetch(profileUrl, {
+        method: 'POST',
+        headers: {
+          apikey: serviceKey,
+          Authorization: `Bearer ${serviceKey}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=representation',
         },
-      ).catch(() => undefined)
+        body: JSON.stringify({
+          id: createdUser.id,
+          full_name: normalizedName,
+          department: normalizedDept,
+          role: targetRole,
+          is_active: true,
+          must_change_password: true,
+        }),
+      })
+      if (profileResponse.ok) {
+        const profiles = await profileResponse.json() as Array<{ id?: string; role?: string; is_active?: boolean; must_change_password?: boolean }>
+        profileConfirmed = Array.isArray(profiles) && profiles.length === 1 &&
+          profiles[0]?.id === createdUser.id && profiles[0]?.role === targetRole &&
+          profiles[0]?.is_active === true && profiles[0]?.must_change_password === true
+      }
+    } catch {
+      // A failed response does not prove whether the profile was written.
+    }
 
-      return jsonResponse(500, { error: profileError })
+    if (!profileConfirmed) {
+      let cleanupConfirmed = false
+      try {
+        const cleanup = await fetch(
+          `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(createdUser.id)}`,
+          { method: 'DELETE', headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` } },
+        )
+        cleanupConfirmed = cleanup.ok
+      } catch {
+        // The delete might have succeeded even if its response was lost.
+      }
+      if (!cleanupConfirmed) {
+        return jsonResponse(500, {
+          code: 'cleanup_unconfirmed', userId: createdUser.id,
+          error: 'User setup failed and cleanup could not be confirmed. Check Auth and the profile before retrying.',
+        })
+      }
+      return jsonResponse(500, {
+        code: 'cleanup_requested', userId: createdUser.id,
+        error: 'User setup failed and the new Auth account was removed. Verify Auth and the profile before retrying.',
+      })
     }
 
     // The temporary password is returned only here, only to the verified

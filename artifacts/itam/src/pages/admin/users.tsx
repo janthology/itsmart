@@ -43,6 +43,7 @@ export default function UsersManagement() {
   const [addUserOpen, setAddUserOpen] = useState(false);
   const [newUser, setNewUser] = useState({ email: "", fullName: "", department: "", role: "general_user" });
   const [addingUser, setAddingUser] = useState(false);
+  const [creationWarning, setCreationWarning] = useState<{ email: string; message: string; userId?: string } | null>(null);
 
   const { data: users, isLoading, error: usersError, refetch: refetchUsers } = useGetUsers({ query: { search: search || undefined } });
   const updateMutation = useUpdateUser();
@@ -93,9 +94,14 @@ export default function UsersManagement() {
       toast({ variant: "destructive", title: "Missing fields", description: "Email and full name are required." });
       return;
     }
+    if (creationWarning) return;
     setAddingUser(true);
+    let requestStarted = false;
+    let resultHandled = false;
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
+      requestStarted = true;
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/create-user`, {
         method: "POST",
         headers: {
@@ -106,15 +112,31 @@ export default function UsersManagement() {
         body: JSON.stringify(newUser),
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Failed to create user");
-      // Show the one-time temporary password exactly once (falls back to a
-      // plain toast only if an older function version didn't return one).
-      if (result.temporaryPassword) {
-        setTempPasswordInfo({ name: newUser.fullName, password: result.temporaryPassword, action: "created" });
-      } else {
-        toast({ title: "User created", description: `${newUser.fullName} has been added.` });
+      if (!res.ok) {
+        if (res.status >= 500 || ["cleanup_unconfirmed", "cleanup_requested", "creation_unconfirmed"].includes(result.code)) {
+          setCreationWarning({
+            email: newUser.email,
+            userId: typeof result.userId === "string" ? result.userId : undefined,
+            message: result.code === "cleanup_requested"
+              ? "User setup failed and Auth reported the new account removed. Verify Auth and the profile before retrying."
+              : "User creation or cleanup could not be confirmed. Check Supabase Auth and the user list before retrying.",
+          });
+          queryClient.invalidateQueries({ queryKey: ["users"] });
+          resultHandled = true;
+          return;
+        }
+        resultHandled = true;
+        throw new Error(result.error || "Failed to create user");
       }
-      logAdminAction("user.created", "user", result.user?.id ?? result.id ?? null, {
+      if (typeof result.temporaryPassword !== "string" || !result.temporaryPassword) {
+        setCreationWarning({ email: newUser.email, message: "The response did not include a temporary password. Check Supabase Auth and the user list before retrying." });
+        queryClient.invalidateQueries({ queryKey: ["users"] });
+        resultHandled = true;
+        return;
+      }
+      resultHandled = true;
+      setTempPasswordInfo({ name: newUser.fullName, password: result.temporaryPassword, action: "created" });
+      logAdminAction("user.created", "user", result.userId ?? result.user?.id ?? result.id ?? null, {
         email: newUser.email,
         role: newUser.role,
       });
@@ -122,8 +144,13 @@ export default function UsersManagement() {
       setNewUser({ email: "", fullName: "", department: "", role: "general_user" });
       queryClient.invalidateQueries({ queryKey: ["users"] });
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to create user.";
-      toast({ variant: "destructive", title: "Error", description: message });
+      if (requestStarted && !resultHandled) {
+        setCreationWarning({ email: newUser.email, message: "The response was lost or unreadable. The account may have been created. Check Supabase Auth and the user list before retrying." });
+        queryClient.invalidateQueries({ queryKey: ["users"] });
+      } else {
+        const message = e instanceof Error ? e.message : "Failed to create user.";
+        toast({ variant: "destructive", title: "Error", description: message });
+      }
     } finally {
       setAddingUser(false);
     }
@@ -209,6 +236,15 @@ export default function UsersManagement() {
           </Button>
         </PageHeader>
 
+        {creationWarning && !addUserOpen && (
+          <div role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">User creation needs review: {creationWarning.email}</p>
+            <p>{creationWarning.message}</p>
+            {creationWarning.userId && <p>Auth user ID: {creationWarning.userId}</p>}
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => setCreationWarning(null)}>I checked; allow retry</Button>
+          </div>
+        )}
+
         {/* Add user dialog */}
         <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
           <DialogContent className="sm:max-w-[560px] rounded-2xl border-0 shadow-2xl p-0 gap-0 overflow-hidden flex max-h-[94vh] flex-col">
@@ -228,6 +264,14 @@ export default function UsersManagement() {
               </DialogHeader>
             </div>
             <div className="flex-1 overflow-y-auto px-6 py-4">
+              {creationWarning && (
+                <div role="alert" className="mb-4 rounded-xl border border-amber-500/50 bg-amber-50 p-3 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+                  <p className="font-semibold">User creation needs review: {creationWarning.email}</p>
+                  <p>{creationWarning.message}</p>
+                  {creationWarning.userId && <p>Auth user ID: {creationWarning.userId}</p>}
+                  <Button variant="outline" size="sm" className="mt-2" onClick={() => setCreationWarning(null)}>I checked; allow retry</Button>
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>Full name</Label>
@@ -280,7 +324,7 @@ export default function UsersManagement() {
               </Button>
               <Button
                 className="flex-1 rounded-xl"
-                disabled={addingUser || !newUser.email || !newUser.fullName}
+                disabled={addingUser || !!creationWarning || !newUser.email.trim() || !newUser.fullName.trim()}
                 onClick={handleAddUser}
               >
                 {addingUser ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserPlus className="w-4 h-4 mr-2" />}

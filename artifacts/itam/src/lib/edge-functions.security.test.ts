@@ -86,34 +86,76 @@ describe('reset-password partial failures', () => {
   });
 });
 
-describe('create-user partial failures', () => {
-  it('characterizes an apparently successful response after a zero-row profile upsert', async () => {
+describe('create-user failure handling', () => {
+  const body = { email: 'synthetic@example.test', fullName: 'Synthetic', role: 'support_staff' };
+  const profile = { id: target, role: 'support_staff', is_active: true, must_change_password: true };
+  const setup = (options: { create?: Response | Error; profile?: Response | Error; cleanup?: Response | Error } = {}) => {
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/auth/v1/user')) return json({ id: caller });
       if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
-      if (url.endsWith('/auth/v1/admin/users') && init?.method === 'POST') return json({ id: target });
-      if (url.includes('/rest/v1/profiles') && init?.method === 'POST') return json([]);
-      throw new Error('unexpected request');
+      let result: Response | Error;
+      if (url.endsWith('/auth/v1/admin/users') && init?.method === 'POST') result = options.create ?? json({ id: target });
+      else if (url.includes('/rest/v1/profiles') && init?.method === 'POST') result = options.profile ?? json([profile]);
+      else if (url.includes('/auth/v1/admin/users/') && init?.method === 'DELETE') result = options.cleanup ?? json({});
+      else throw new Error('unexpected request');
+      if (result instanceof Error) throw result;
+      return result;
     });
-    const response = await loadFunction('create-user', fetch as unknown as typeof globalThis.fetch)(request({ email: 'synthetic@example.test', fullName: 'Synthetic', role: 'support_staff' }));
+    return { fetch, handler: loadFunction('create-user', fetch as unknown as typeof globalThis.fetch) };
+  };
+  it('returns the temporary password only after the exact profile is confirmed', async () => {
+    const { handler, fetch } = setup();
+    const response = await handler(request(body));
+    const result = await response.json();
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ success: true, userId: target });
+    expect(result).toMatchObject({ success: true, userId: target });
+    expect(result.temporaryPassword).toHaveLength(20);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
   });
-  it('characterizes ignored rollback failures after a rejected profile upsert', async () => {
-    let cleanupAttempted = false;
-    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/auth/v1/user')) return json({ id: caller });
-      if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
-      if (url.endsWith('/auth/v1/admin/users') && init?.method === 'POST') return json({ id: target });
-      if (url.includes('/rest/v1/profiles') && init?.method === 'POST') return json({ message: 'profile failed' }, 500);
-      if (url.includes('/auth/v1/admin/users/') && init?.method === 'DELETE') { cleanupAttempted = true; return json({ message: 'cleanup failed' }, 500); }
-      throw new Error('unexpected request');
-    });
-    const response = await loadFunction('create-user', fetch as unknown as typeof globalThis.fetch)(request({ email: 'synthetic@example.test', fullName: 'Synthetic', role: 'support_staff' }));
-    expect(cleanupAttempted).toBe(true);
-    expect(response.status).toBe(500);
-    expect(await response.json()).not.toHaveProperty('temporaryPassword');
+  it.each([
+    ['zero rows', () => json([])],
+    ['wrong id', () => json([{ ...profile, id: caller }])],
+    ['wrong role', () => json([{ ...profile, role: 'general_user' }])],
+    ['flag not set', () => json([{ ...profile, must_change_password: false }])],
+    ['http failure', () => json({ message: 'failed' }, 500)],
+    ['lost response', () => new Error('network failure')],
+    ['invalid JSON', () => new Response('not JSON')],
+  ])('%s profile response attempts and checks compensation', async (_label, response) => {
+    const { handler, fetch } = setup({ profile: response() });
+    const result = await handler(request(body));
+    expect(result.status).toBe(500);
+    const payload = await result.json();
+    expect(payload).toMatchObject({ code: 'cleanup_requested', userId: target });
+    expect(payload).not.toHaveProperty('temporaryPassword');
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'DELETE')).toHaveLength(1);
+  });
+  it.each([
+    ['non-success response', () => json({ message: 'failed' }, 500)],
+    ['lost response', () => new Error('network failure')],
+  ])('reports cleanup as unconfirmed on %s', async (_label, response) => {
+    const { handler } = setup({ profile: json([], 200), cleanup: response() });
+    const result = await handler(request(body));
+    expect(result.status).toBe(500);
+    const payload = await result.json();
+    expect(payload).toMatchObject({ code: 'cleanup_unconfirmed', userId: target });
+    expect(payload).not.toHaveProperty('temporaryPassword');
+  });
+  it.each([
+    ['lost creation response', () => new Error('network failure')],
+    ['server error', () => json({}, 500)],
+    ['missing ID', () => json({})],
+    ['invalid JSON', () => new Response('not JSON')],
+  ])('does not claim the creation failed after %s', async (_label, response) => {
+    const { handler, fetch } = setup({ create: response() });
+    const result = await handler(request(body));
+    expect(result.status).toBe(503);
+    expect(await result.json()).toMatchObject({ code: 'creation_unconfirmed' });
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+  });
+  it('rejects whitespace-only fields before the Auth request', async () => {
+    const { handler, fetch } = setup();
+    expect((await handler(request({ ...body, fullName: '  ' }))).status).toBe(400);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 });
