@@ -214,3 +214,54 @@ test('depreciation preview and downloads handle zero-cost and future assets', as
   expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
   expect(pdf.toString('latin1')).toContain('(N/A)');
 });
+
+// Characterization of a known issue: status update and activity comment are
+// separate requests. Keep this test until an atomic/partial-success design is fixed.
+test('audit: a ticket status update can succeed while its activity entry fails', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  let currentStatus = 'open';
+  let commentFailed = false;
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS' };
+  await page.route('**/rest/v1/tickets*', async route => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (req.method() === 'PATCH') {
+      currentStatus = req.postDataJSON().status;
+      return route.fulfill({ status: 204, headers });
+    }
+    const url = new URL(req.url());
+    const value = url.searchParams.get('select') === 'on_hold_at, total_hold_seconds'
+      ? { on_hold_at: null, total_hold_seconds: 0 }
+      : { ...ticket, status: currentStatus };
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(value) });
+  });
+  await page.route('**/rest/v1/ticket_comments*', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (route.request().method() === 'POST') {
+      commentFailed = true;
+      return route.fulfill({ status: 500, headers, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic comment failure' }) });
+    }
+    return route.fallback();
+  });
+  await page.goto(`/tickets/${ticketId}`);
+  await expect(page.getByRole('heading', { name: 'Synthetic ticket' })).toBeVisible();
+  await page.getByRole('combobox').first().click();
+  await page.getByRole('option', { name: /In progress/i }).click();
+  await expect(page.getByText('Failed to update status.')).toBeVisible();
+  expect(commentFailed).toBe(true);
+  expect(currentStatus).toBe('in_progress');
+});
+
+// Characterization: an error must eventually be rendered separately from an empty report.
+test('audit: report fetch failure is currently displayed as no data', async ({ page }) => {
+  await syntheticSession(page, 'general_user');
+  let failures = 0;
+  await page.route('**/rest/v1/tickets*', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' } });
+    failures++;
+    return route.fulfill({ status: 500, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*' }, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic report failure' }) });
+  });
+  await page.goto('/reports');
+  await expect.poll(() => failures).toBeGreaterThan(0);
+  await expect(page.getByText('No data for this report')).toBeVisible({ timeout: 10000 });
+});

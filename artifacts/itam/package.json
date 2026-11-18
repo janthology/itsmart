@@ -24,6 +24,7 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.16",
     "@hookform/resolvers": "^3.10.0",
     "@playwright/test": "^1.64.1",
     "@radix-ui/react-accordion": "^1.2.4",
