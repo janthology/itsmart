@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "git": { "deploymentEnabled": { "arena/fbb1e145-itsmart": false } },
   "buildCommand": "pnpm --filter @workspace/itam build",
   "outputDirectory": "artifacts/itam/dist",
   "installCommand": "pnpm install",

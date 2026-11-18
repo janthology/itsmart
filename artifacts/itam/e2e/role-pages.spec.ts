@@ -215,41 +215,156 @@ test('depreciation preview and downloads handle zero-cost and future assets', as
   expect(pdf.toString('latin1')).toContain('(N/A)');
 });
 
-// Characterization of a known issue: status update and activity comment are
-// separate requests. Keep this test until an atomic/partial-success design is fixed.
-test('audit: a ticket status update can succeed while its activity entry fails', async ({ page }) => {
+// The ticket change and comment are still separate requests; exercise partial
+// success and ambiguous outcomes without contacting a real backend.
+for (const action of ['Status', 'Assignment', 'Priority'] as const) {
+  test(`${action} update warns when the activity entry is unconfirmed`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    let current = { ...ticket };
+    let commentAttempts = 0;
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS' };
+    await page.route('**/rest/v1/tickets*', async route => {
+      const req = route.request();
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (req.method() === 'PATCH') {
+        current = { ...current, ...req.postDataJSON() };
+        return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify([{ id: ticketId }]) });
+      }
+      const url = new URL(req.url());
+      const value = url.searchParams.get('select') === 'on_hold_at, total_hold_seconds'
+        ? { on_hold_at: null, total_hold_seconds: 0 } : current;
+      return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(value) });
+    });
+    await page.route('**/rest/v1/ticket_comments*', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (route.request().method() === 'POST') {
+        commentAttempts++;
+        return route.fulfill({ status: 500, headers, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic comment failure' }) });
+      }
+      return route.fallback();
+    });
+    await page.goto(`/tickets/${ticketId}`);
+    await expect(page.getByRole('heading', { name: 'Synthetic ticket' })).toBeVisible();
+    const management = page.locator('div').filter({ has: page.getByText('Ticket management', { exact: true }) }).filter({ has: page.getByText('Update Status', { exact: true }) }).last();
+    const selects = management.getByRole('combobox');
+    if (action === 'Status') {
+      await selects.nth(0).click();
+      await page.getByRole('option', { name: 'Closed' }).click();
+      await page.getByPlaceholder(/Reason for closing/).fill('Synthetic closure reason');
+      await page.getByRole('button', { name: 'Confirm Close' }).click();
+    } else if (action === 'Priority') {
+      await selects.nth(1).click();
+      await page.getByRole('option', { name: 'High - 2', exact: true }).click();
+      await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+    } else {
+      await selects.nth(3).click();
+      await page.getByRole('option', { name: 'Unassigned', exact: true }).click();
+    }
+    const warning = page.getByRole('alert').filter({ hasText: `${action} was updated` });
+    await expect(warning).toContainText('activity entry could not be confirmed');
+    await expect(warning).toContainText('may already have been saved');
+    if (action === 'Status') {
+      expect(current.status).toBe('closed');
+      expect(current.assigned_to).toBe(profiles[1].id);
+      await expect(warning).toContainText('Synthetic closure reason');
+    }
+    if (action === 'Priority') expect(current.priority).toBe('high');
+    if (action === 'Assignment') expect(current.assigned_to).toBeNull();
+    expect(commentAttempts).toBe(1);
+    await warning.getByRole('button', { name: 'Dismiss warning' }).click();
+    await expect(warning).toHaveCount(0);
+  });
+}
+
+test('successful ticket update adds one activity entry', async ({ page }) => {
   await syntheticSession(page, 'administrator');
   let currentStatus = 'open';
-  let commentFailed = false;
+  let comments = 0;
   const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS' };
   await page.route('**/rest/v1/tickets*', async route => {
     const req = route.request();
     if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (req.method() === 'PATCH') {
       currentStatus = req.postDataJSON().status;
-      return route.fulfill({ status: 204, headers });
+      return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify([{ id: ticketId }]) });
     }
-    const url = new URL(req.url());
-    const value = url.searchParams.get('select') === 'on_hold_at, total_hold_seconds'
-      ? { on_hold_at: null, total_hold_seconds: 0 }
-      : { ...ticket, status: currentStatus };
+    const value = new URL(req.url()).searchParams.get('select') === 'on_hold_at, total_hold_seconds'
+      ? { on_hold_at: null, total_hold_seconds: 0 } : { ...ticket, status: currentStatus };
     return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(value) });
   });
   await page.route('**/rest/v1/ticket_comments*', async route => {
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
     if (route.request().method() === 'POST') {
-      commentFailed = true;
-      return route.fulfill({ status: 500, headers, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic comment failure' }) });
+      comments++;
+      return route.fulfill({ status: 201, headers });
     }
     return route.fallback();
   });
   await page.goto(`/tickets/${ticketId}`);
-  await expect(page.getByRole('heading', { name: 'Synthetic ticket' })).toBeVisible();
   await page.getByRole('combobox').first().click();
   await page.getByRole('option', { name: /In progress/i }).click();
-  await expect(page.getByText('Failed to update status.', { exact: true })).toBeVisible();
-  expect(commentFailed).toBe(true);
+  await expect(page.getByText('Status updated', { exact: true })).toBeVisible();
   expect(currentStatus).toBe('in_progress');
+  expect(comments).toBe(1);
+  await expect(page.getByRole('alert').filter({ hasText: 'activity entry could not be confirmed' })).toHaveCount(0);
+});
+
+for (const outcome of ['zero rows', 'network error'] as const) {
+  test(`unconfirmed ticket update (${outcome}) never creates an activity entry`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    let comments = 0;
+    let reads = 0;
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS' };
+    await page.route('**/rest/v1/tickets*', async route => {
+      const req = route.request();
+      if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      if (req.method() === 'PATCH') {
+        if (outcome === 'network error') return route.abort('failed');
+        return route.fulfill({ status: 200, headers, contentType: 'application/json', body: '[]' });
+      }
+      reads++;
+      const url = new URL(req.url());
+      const value = url.searchParams.get('select') === 'on_hold_at, total_hold_seconds'
+        ? { on_hold_at: null, total_hold_seconds: 0 } : ticket;
+      return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(value) });
+    });
+    await page.route('**/rest/v1/ticket_comments*', async route => {
+      if (route.request().method() === 'POST') comments++;
+      return route.fallback();
+    });
+    await page.goto(`/tickets/${ticketId}`);
+    await page.getByRole('combobox').first().click();
+    await page.getByRole('option', { name: /In progress/i }).click();
+    await expect(page.getByText('Could not confirm the status update. Check the refreshed ticket before retrying.')).toBeVisible();
+    expect(comments).toBe(0);
+    expect(reads).toBeGreaterThanOrEqual(3);
+  });
+}
+
+test('unconfirmed status update retains the required remarks for recovery', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  let comments = 0;
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, POST, OPTIONS' };
+  await page.route('**/rest/v1/tickets*', async route => {
+    const req = route.request();
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (req.method() === 'PATCH') return route.abort('failed');
+    const value = new URL(req.url()).searchParams.get('select') === 'on_hold_at, total_hold_seconds'
+      ? { on_hold_at: null, total_hold_seconds: 0 } : ticket;
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(value) });
+  });
+  await page.route('**/rest/v1/ticket_comments*', async route => {
+    if (route.request().method() === 'POST') comments++;
+    return route.fallback();
+  });
+  await page.goto(`/tickets/${ticketId}`);
+  await page.getByRole('combobox').first().click();
+  await page.getByRole('option', { name: 'Closed' }).click();
+  await page.getByPlaceholder(/Reason for closing/).fill('Keep this reason safe');
+  await page.getByRole('button', { name: 'Confirm Close' }).click();
+  const warning = page.getByRole('alert').filter({ hasText: 'No activity entry was attempted' });
+  await expect(warning).toContainText('Keep this reason safe');
+  expect(comments).toBe(0);
 });
 
 test('report fetch failure displays retry and prevents export until recovered', async ({ page }) => {

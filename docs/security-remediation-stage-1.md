@@ -51,3 +51,9 @@ This is stronger than the earlier reduced-schema test, but it is **not** the Sup
 The report page now displays an error and retry action and hides the export controls if the active report query fails, rather than presenting an empty result. Tests cover ticket, inventory, history, performance and user-activity data sources with mocked failures. This is not a live integration test.
 
 Mandatory password enforcement; admin reset/create partial-failure recovery; staff ticket transition enforcement; transactional asset/ticket audit; SLA recipient deduplication; safe number generation; migration-history reconciliation; dependency remediation; CSP reporting; verified backup/restore; and production integration remain open. The retention/deletion policy for history and maintenance records also needs an explicit decision before its permissions are changed.
+
+## Local-only ticket partial-success mitigation
+
+Ticket status, priority and assignment changes still perform separate update and activity requests. The locally prepared UI now checks for a returned updated row, refreshes after errors, and warns when the activity response is unconfirmed; the intended activity text stays on the page until dismissed or navigated away. Status remarks are also retained on the page when the update outcome is uncertain. It never silently retries a potentially committed activity request. Ticket type changes now report unconfirmed errors. Synthetic browser tests cover success, zero rows, network failure, and activity failures for all three actions. This is a mitigation, not transactional audit integrity; an atomic server-side design, concurrency tests, and deployment verification remain open.
+
+Automatic Vercel deployments from this session branch are disabled in `vercel.json` so the required branch push does not intentionally deploy the local-only work. This does not change other branch deployment settings; confirm the deployment result rather than assuming.

@@ -74,7 +74,7 @@ export default function TicketDetail() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: ticket, isLoading, isError } = useGetTicket(id);
+  const { data: ticket, isLoading, isError, refetch } = useGetTicket(id);
   const updateMutation = useUpdateTicket();
   const commentMutation = useAddTicketComment();
   const { data: supportStaff } = useGetSupportStaff();
@@ -125,6 +125,21 @@ export default function TicketDetail() {
 
   // Priority confirmation state
   const [pendingPriority, setPendingPriority] = useState<string | null>(null);
+  // Kept in memory until dismissed; activity POST outcomes can be ambiguous
+  // on a lost response, so never retry automatically and risk duplication.
+  const [activityWarnings, setActivityWarnings] = useState<{ action: string; remark: string; outcome: "activity" | "update" }[]>([]);
+  useEffect(() => setActivityWarnings([]), [id]);
+  const saveActivity = async (action: string, remark: string) => {
+    try {
+      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
+      return true;
+    } catch {
+      setActivityWarnings(previous => [...previous, { action, remark, outcome: "activity" }]);
+      void queryClient.invalidateQueries({ queryKey: ['ticket', id] });
+      toast({ variant: "destructive", title: `${action} updated; activity unconfirmed`, description: "Check the warning on this page before leaving." });
+      return false;
+    }
+  };
 
   // Called when user picks a new status from the dropdown
   const handleStatusSelect = (newStatus: string) => {
@@ -139,10 +154,6 @@ export default function TicketDetail() {
   // Actually commits the status change + logs comment
   const applyStatusChange = async (newStatus: string, remarks: string | null) => {
     try {
-      const updates: any = { status: newStatus as TicketStatus };
-      if (newStatus === 'open') updates.assignedToId = null;
-      await updateMutation.mutateAsync({ id, data: updates });
-
       let remark = newStatus === 'open' && ticket?.assignedTo
         ? `🔄 Status changed to "${STATUS_LABEL[newStatus]}" by ${user?.fullName ?? 'Unknown'}. Ticket unassigned.`
         : `🔄 Status changed to "${STATUS_LABEL[newStatus] ?? newStatus}" by ${user?.fullName ?? 'Unknown'}.`;
@@ -156,10 +167,21 @@ export default function TicketDetail() {
       }
       if (remarks?.trim()) remark += `\n\n📝 Remarks: ${remarks.trim()}`;
 
-      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
-      toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
+      const updates: any = { status: newStatus as TicketStatus };
+      if (newStatus === 'open') updates.assignedToId = null;
+      try {
+        await updateMutation.mutateAsync({ id, data: updates });
+      } catch {
+        // A lost PATCH response may still mean the server committed. Preserve
+        // required remarks but never create a comment for an uncertain update.
+        setActivityWarnings(previous => [...previous, { action: "Status", remark, outcome: "update" }]);
+        throw new Error('Ticket update not confirmed');
+      }
+      if (await saveActivity("Status", remark)) {
+        toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
+      }
     } catch (e) {
-      toast({ variant: "destructive", title: "Error", description: "Failed to update status." });
+      toast({ variant: "destructive", title: "Error", description: "Could not confirm the status update. Check the refreshed ticket before retrying." });
     } finally {
       setPendingStatus(null);
       setRemarksText("");
@@ -185,10 +207,11 @@ export default function TicketDetail() {
       const remark = assigneeId
         ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}.${statusNote}`
         : `🔓 Ticket unassigned by ${user?.fullName ?? 'Unknown'}.${statusNote}`;
-      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
-      toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
+      if (await saveActivity("Assignment", remark)) {
+        toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
+      }
     } catch (e) {
-      toast({ variant: "destructive", title: "Error", description: "Failed to assign ticket." });
+      toast({ variant: "destructive", title: "Error", description: "Could not confirm the assignment update. Check the refreshed ticket before retrying." });
     }
   };
 
@@ -199,12 +222,12 @@ export default function TicketDetail() {
     setPendingPriority(null); // close immediately
     try {
       await updateMutation.mutateAsync({ id, data: { priority: newPriority as any } });
-      await commentMutation.mutateAsync({ id, data: {
-        commentText: `${PRIORITY_RANK[newPriority] < PRIORITY_RANK[oldPriority] ? '⬆️' : '⬇️'} Priority changed from "${PRIORITY_LABEL[oldPriority]}" to "${PRIORITY_LABEL[newPriority]}" by ${user?.fullName ?? 'Unknown'}.`
-      }});
-      toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
+      const remark = `${PRIORITY_RANK[newPriority] < PRIORITY_RANK[oldPriority] ? '⬆️' : '⬇️'} Priority changed from "${PRIORITY_LABEL[oldPriority]}" to "${PRIORITY_LABEL[newPriority]}" by ${user?.fullName ?? 'Unknown'}.`;
+      if (await saveActivity("Priority", remark)) {
+        toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
+      }
     } catch {
-      toast({ variant: "destructive", title: "Error", description: "Failed to update priority." });
+      toast({ variant: "destructive", title: "Error", description: "Could not confirm the priority update. Check the refreshed ticket before retrying." });
     }
   };
 
@@ -319,7 +342,7 @@ export default function TicketDetail() {
       </AppLayout>
     );
   }
-  if (isError || !ticket) return <AppLayout><div className="text-center p-8 text-destructive">Ticket not found.</div></AppLayout>;
+  if (!ticket) return <AppLayout><div className="text-center p-8 text-destructive">{isError ? "Could not load this ticket." : "Ticket not found."}</div></AppLayout>;
 
   const isClosing = pendingStatus === 'closed';
   const ticketNum = (ticket as any).ticketNumber ?? `#${ticket.id.substring(0, 8)}`;
@@ -355,6 +378,31 @@ export default function TicketDetail() {
         >
           <ArrowLeft className="w-4 h-4" /> Back to tickets
         </Link>
+
+        {isError && (
+          <div role="alert" className="rounded-xl border border-destructive/50 bg-destructive/10 p-4 text-sm">
+            <p>Could not refresh the ticket. The information shown may be out of date; do not retry changes until the ticket loads successfully.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => void refetch()}>Retry ticket refresh</Button>
+          </div>
+        )}
+
+        {activityWarnings.map((warning, index) => (
+          <div key={index} role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            {warning.outcome === "activity" ? (
+              <>
+                <p className="font-semibold">{warning.action} was updated, but its activity entry could not be confirmed.</p>
+                <p className="mt-1">Check the activity log before adding the entry manually. It may already have been saved. Keep the text below before leaving this page; this warning is not saved.</p>
+              </>
+            ) : (
+              <>
+                <p className="font-semibold">The status update could not be confirmed. No activity entry was attempted.</p>
+                <p className="mt-1">Check the refreshed ticket before retrying. If it changed, check the activity log and record the remarks below as needed. Keep the text before leaving; this warning is not saved.</p>
+              </>
+            )}
+            <p className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2">{warning.remark}</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => setActivityWarnings(previous => previous.filter((_, i) => i !== index))}>Dismiss warning</Button>
+          </div>
+        ))}
 
         {/* Priority Confirmation Dialog */}
         <Dialog open={!!pendingPriority} onOpenChange={(open) => { if (!open) setPendingPriority(null); }}>
@@ -785,7 +833,9 @@ export default function TicketDetail() {
                             value={(ticket as any).type ?? 'other'}
                             onValueChange={(val) => {
                               if (val !== (ticket as any).type) {
-                                updateMutation.mutate({ id, data: { type: val } as any });
+                                updateMutation.mutate({ id, data: { type: val } as any }, {
+                                  onError: () => toast({ variant: "destructive", title: "Error", description: "Could not confirm the type update. Check the refreshed ticket before retrying." }),
+                                });
                               }
                             }}
                             disabled={updateMutation.isPending}

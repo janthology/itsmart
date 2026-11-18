@@ -318,10 +318,13 @@ export function useUpdateTicket() {
       if (data.status === 'open' || data.status === 'in_progress' || data.status === 'on_hold') {
         if (data.status !== 'on_hold') updates.resolved_at = null;
       }
-      const { error } = await supabase.from('tickets').update(updates).eq('id', id);
+      const { data: changed, error } = await supabase.from('tickets').update(updates).eq('id', id).select('id');
       if (error) throw error;
+      // RLS can silently filter an update down to zero rows. Do not create
+      // a misleading activity entry or claim success in that case.
+      if (changed?.length !== 1) throw new Error('Ticket update was not confirmed');
     },
-    onSuccess: (_d, { id }) => {
+    onSettled: (_d, _e, { id }) => {
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.invalidateQueries({ queryKey: ['ticketSummary'] });
       qc.invalidateQueries({ queryKey: ['ticket', id] });
