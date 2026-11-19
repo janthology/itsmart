@@ -417,6 +417,17 @@ describe('full repository migrations in isolated PostgreSQL', () => {
       await db.exec('RESET ROLE; ROLLBACK');
     }
   });
+  it('removes Supabase-style service default grants from asset counters, request ledger and RPC', async () => {
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
+    // Simulate live public-schema defaults even on reapplication over retained tables.
+    await db.exec('GRANT ALL ON public.asset_tag_counters,public.asset_creation_requests TO service_role; GRANT EXECUTE ON FUNCTION public.create_asset_with_history(uuid,jsonb) TO service_role');
+    await db.exec(script('20261101000018_create_asset_atomically.sql'));
+    const privileges = await db.query("SELECT has_table_privilege('service_role','public.asset_tag_counters','SELECT') AS counter_select, has_table_privilege('service_role','public.asset_creation_requests','INSERT') AS ledger_insert, has_function_privilege('service_role','public.create_asset_with_history(uuid,jsonb)','EXECUTE') AS rpc_execute, has_function_privilege('authenticated','public.create_asset_with_history(uuid,jsonb)','EXECUTE') AS auth_execute");
+    expect(privileges.rows).toEqual([{counter_select:false,ledger_insert:false,rpc_execute:false,auth_execute:true}]);
+    await db.exec('SET ROLE service_role');
+    await expect(db.query('SELECT * FROM public.asset_creation_requests')).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE');
+  });
   it('rollback restores the old function definitions in the full synthetic schema', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
     await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000014_ticket_and_asset_write_guards.sql', import.meta.url), 'utf8'));

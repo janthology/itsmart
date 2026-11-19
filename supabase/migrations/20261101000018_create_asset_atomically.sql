@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS public.asset_tag_counters (
   last_issued bigint NOT NULL CHECK (last_issued > 0)
 );
 ALTER TABLE public.asset_tag_counters ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.asset_tag_counters FROM PUBLIC, anon, authenticated;
+-- Supabase default privileges may grant service_role all rights. The RPC owner
+-- needs access; client/service-role callers do not need direct ledger access.
+REVOKE ALL ON public.asset_tag_counters FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE TABLE IF NOT EXISTS public.asset_creation_requests (
   actor_id uuid NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
@@ -18,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.asset_creation_requests (
   PRIMARY KEY (actor_id, request_id)
 );
 ALTER TABLE public.asset_creation_requests ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.asset_creation_requests FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.asset_creation_requests FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.create_asset_with_history(p_request_id uuid, p_asset jsonb)
 RETURNS public.assets LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
@@ -82,5 +84,5 @@ BEGIN
   RETURN created;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.create_asset_with_history(uuid,jsonb) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.create_asset_with_history(uuid,jsonb) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.create_asset_with_history(uuid,jsonb) TO authenticated;
