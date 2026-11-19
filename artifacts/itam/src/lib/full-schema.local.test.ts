@@ -233,6 +233,60 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     await asUser(admin);
     await db.query("DELETE FROM tickets WHERE title='LOCAL-ALLOC-GENERAL'");
   });
+  it('records ticket and asset changes transactionally with a server-derived actor', async () => {
+    await asUser(admin);
+    const ticket = await db.query<{ id: string }>("INSERT INTO tickets(title,created_by) VALUES ('AUDIT-LOCAL',$1) RETURNING id", [admin]);
+    const id = ticket.rows[0].id;
+    await asUser(support);
+    await db.query("UPDATE tickets SET title='AUDIT-UPDATED' WHERE id=$1", [id]);
+    expect((await db.query('SELECT * FROM entity_change_audit WHERE entity_id=$1', [id])).rows).toHaveLength(0);
+    await expect(db.query("INSERT INTO entity_change_audit(entity_type,entity_id,operation,new_values) VALUES ('ticket',$1,'INSERT','{}')", [id])).rejects.toThrow(/permission denied/);
+    await asUser(admin);
+    const events = await db.query<{ operation: string; actor_id: string; old_values: Record<string, unknown>; new_values: Record<string, unknown> }>(
+      'SELECT operation,actor_id,old_values,new_values FROM entity_change_audit WHERE entity_id=$1 ORDER BY id', [id]);
+    expect(events.rows.map(event => [event.operation, event.actor_id])).toEqual([['INSERT', admin], ['UPDATE', support]]);
+    expect(events.rows[1].old_values.title).toBe('AUDIT-LOCAL');
+    expect(events.rows[1].new_values.title).toBe('AUDIT-UPDATED');
+    await expect(db.query('DELETE FROM entity_change_audit WHERE entity_id=$1', [id])).rejects.toThrow(/permission denied/);
+    const asset = await db.query<{ id: string }>("INSERT INTO assets(asset_tag,name,category,pm_required) VALUES ('LOCAL-AUDIT-ASSET','Audit asset','laptop',false) RETURNING id");
+    await db.query('DELETE FROM assets WHERE id=$1', [asset.rows[0].id]);
+    const assetEvents = await db.query<{ operation: string; actor_id: string }>('SELECT operation,actor_id FROM entity_change_audit WHERE entity_id=$1 ORDER BY id', [asset.rows[0].id]);
+    expect(assetEvents.rows).toEqual([{ operation: 'INSERT', actor_id: admin }, { operation: 'DELETE', actor_id: admin }]);
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); ALTER TABLE entity_change_audit ADD CONSTRAINT local_reject_audit CHECK (entity_type <> 'ticket') NOT VALID;");
+    await asUser(admin);
+    await expect(db.query("UPDATE tickets SET title='MUST-ROLL-BACK' WHERE id=$1", [id])).rejects.toThrow(/local_reject_audit/);
+    expect((await db.query('SELECT title FROM tickets WHERE id=$1', [id])).rows).toEqual([{ title: 'AUDIT-UPDATED' }]);
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); ALTER TABLE entity_change_audit DROP CONSTRAINT local_reject_audit;");
+    const before = await db.query('SELECT count(*)::int AS n FROM entity_change_audit');
+    await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000019_transactional_entity_audit.sql', import.meta.url), 'utf8'));
+    expect(await db.query('SELECT count(*)::int AS n FROM entity_change_audit')).toEqual(before);
+    await db.exec(script('20261101000019_transactional_entity_audit.sql'));
+    await asUser(admin);
+    await db.query("UPDATE tickets SET title='AUDIT-REAPPLIED' WHERE id=$1", [id]);
+    expect((await db.query('SELECT operation FROM entity_change_audit WHERE entity_id=$1', [id])).rows).toHaveLength(3);
+  });
+  it('retains independently attributed audit evidence when comments or asset history are deleted', async () => {
+    await asUser(general);
+    const ticket = await db.query<{ id: string }>("INSERT INTO tickets(title,created_by) VALUES ('AUDIT-COMMENT',$1) RETURNING id", [general]);
+    const comment = await db.query<{ id: string }>("INSERT INTO ticket_comments(ticket_id,created_by,comment_text) VALUES ($1,$2,'Actual message') RETURNING id", [ticket.rows[0].id, general]);
+    await asUser(admin);
+    await db.query('DELETE FROM ticket_comments WHERE id=$1', [comment.rows[0].id]);
+    const commentEvents = await db.query<{ operation: string; actor_id: string; old_values: { comment_text?: string } | null }>(
+      "SELECT operation,actor_id,old_values FROM entity_change_audit WHERE entity_type='ticket_comment' AND entity_id=$1 ORDER BY id", [comment.rows[0].id]);
+    expect(commentEvents.rows.map(event => [event.operation, event.actor_id])).toEqual([['INSERT', general], ['DELETE', admin]]);
+    expect(commentEvents.rows[1].old_values?.comment_text).toBe('Actual message');
+    const asset = await db.query<{ id: string }>("INSERT INTO assets(asset_tag,name,category,pm_required) VALUES ('LOCAL-AUDIT-HISTORY','Audit history','laptop',false) RETURNING id");
+    await asUser(support);
+    const history = await db.query<{ id: string }>("INSERT INTO asset_history(asset_id,action,changed_by,new_value) VALUES ($1,'field_updated',$2,'Claim') RETURNING id", [asset.rows[0].id, support]);
+    await asUser(admin);
+    await db.query('DELETE FROM asset_history WHERE id=$1', [history.rows[0].id]);
+    const historyEvents = await db.query<{ operation: string; actor_id: string }>("SELECT operation,actor_id FROM entity_change_audit WHERE entity_type='asset_history' AND entity_id=$1 ORDER BY id", [history.rows[0].id]);
+    expect(historyEvents.rows).toEqual([{ operation: 'INSERT', actor_id: support }, { operation: 'DELETE', actor_id: admin }]);
+    await asUser(support);
+    const maintenance = await db.query<{ id: string }>("SELECT public.record_asset_maintenance($1,'corrective',CURRENT_DATE,$2,'Work',NULL,'40000000-0000-4000-8000-000000000010') AS id", [asset.rows[0].id, support]);
+    await asUser(admin);
+    expect((await db.query("SELECT operation,actor_id FROM entity_change_audit WHERE entity_type='asset_maintenance' AND entity_id=$1", [maintenance.rows[0].id])).rows).toEqual([{ operation: 'INSERT', actor_id: support }]);
+  });
   it('rollback restores the old function definitions in the full synthetic schema', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
     await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000014_ticket_and_asset_write_guards.sql', import.meta.url), 'utf8'));

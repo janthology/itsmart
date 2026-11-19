@@ -25,7 +25,7 @@ try {
   const metadata = await control.query(`
     SELECT inet_server_addr() IS NULL AS unix_socket, current_setting('data_directory') AS data_directory,
       (SELECT count(*)::int FROM pg_database WHERE datallowconn AND NOT datistemplate AND datname <> 'postgres') AS other_databases,
-      (SELECT count(*)::int FROM pg_roles WHERE rolname IN ('anon','authenticated')) AS existing_app_roles,
+      (SELECT count(*)::int FROM pg_roles WHERE rolname IN ('anon','authenticated','service_role')) AS existing_app_roles,
       (SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','S','f')) AS public_objects
   `);
@@ -33,7 +33,7 @@ try {
   if (!info.unix_socket || !isTemporary(realpathSync(info.data_directory)) || info.other_databases || info.existing_app_roles || info.public_objects) {
     throw new Error('Refusing: server is not a fresh temporary disposable cluster.');
   }
-  for (const role of ['anon', 'authenticated']) {
+  for (const role of ['anon', 'authenticated', 'service_role']) {
     await control.query(`CREATE ROLE ${role}`);
     rolesCreated.push(role);
   }
@@ -156,6 +156,34 @@ try {
   const totals = await pool.query('SELECT (SELECT count(*)::int FROM public.assets) AS assets, (SELECT count(DISTINCT asset_tag)::int FROM public.assets) AS tags, (SELECT count(*)::int FROM public.asset_history) AS history');
   assert.deepEqual(totals.rows[0], { assets: 17, tags: 17, history: 17 });
   console.log('PASS: 16 concurrent asset creates had distinct tags; 12 concurrent retries created one asset and one history entry.');
+
+  const auditMigration = readFileSync(new URL('../../../supabase/migrations/20261101000019_transactional_entity_audit.sql', import.meta.url), 'utf8');
+  await pool.query('CREATE TABLE public.ticket_comments(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), ticket_id uuid, comment_text text); CREATE TABLE public.asset_maintenance_log(id uuid PRIMARY KEY DEFAULT gen_random_uuid(), asset_id uuid, description text)');
+  await pool.query(auditMigration);
+  await pool.query('GRANT UPDATE ON public.tickets TO authenticated');
+  const updates = await Promise.allSettled(Array.from({ length: 12 }, async (_, i) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('request.jwt.claim.sub',$1,true)", [userId]);
+      await client.query('SET LOCAL ROLE authenticated');
+      await client.query('UPDATE public.tickets SET title=title || $1 WHERE id=$2', [`-${i}`, ticketId]);
+      await client.query('SELECT pg_sleep(0.01)');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }));
+  const updateErrors = updates.filter(result => result.status === 'rejected');
+  if (updateErrors.length) throw new AggregateError(updateErrors.map(result => result.reason), 'Concurrent audited updates failed');
+  const recorded = await pool.query("SELECT count(*)::int AS total FROM entity_change_audit WHERE entity_id=$1 AND operation='UPDATE' AND actor_id=$2", [ticketId, userId]);
+  assert.equal(recorded.rows[0].total, 12);
+  const original = await pool.query('SELECT title FROM tickets WHERE id=$1', [ticketId]);
+  await pool.query("ALTER TABLE entity_change_audit ADD CONSTRAINT test_reject_ticket CHECK (entity_type <> 'ticket') NOT VALID");
+  await assert.rejects(pool.query("UPDATE tickets SET title='must roll back' WHERE id=$1", [ticketId]), /test_reject_ticket/);
+  assert.deepEqual((await pool.query('SELECT title FROM tickets WHERE id=$1', [ticketId])).rows, original.rows);
+  console.log('PASS: 12 concurrent ticket changes produced 12 attributed audit entries; audit failure rolled back the ticket change.');
 } finally {
   if (pool) await pool.end();
   if (databaseCreated) await control.query(`DROP DATABASE ${dbName}`);

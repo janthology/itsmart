@@ -1,5 +1,7 @@
 # System remediation — stage 3, locally prepared
 
+**Later local update:** a proposed transactional structured audit stream is documented in `security-remediation-stage-4.md`. It is not deployed and does not replace the existing activity/history screens or make human remarks atomic.
+
 **Not deployed.** This is not authorization to run a migration or deploy the frontend. The live migration history differs from repository versions; do not use a blanket `supabase db push`. Present each exact production change and its rollback for separate approval. There is no verified backup or isolated Supabase project; the configuration inventory is not a recoverable backup. No production reset or deletion is authorized.
 
 ## Atomic asset creation and tag allocation
