@@ -226,6 +226,44 @@ try {
   assert.match(String(rejectedChange?.reason), /refresh and try again/);
   assert.equal((await pool.query('SELECT count(*)::int AS n FROM ticket_comments WHERE ticket_id=$1', [ticketId])).rows[0].n, 1);
   console.log('PASS: concurrent ticket workflow requests with the same version produced one change/comment and one stale-version rejection.');
+
+  // Isolated state-machine research only: it does not prove password changes,
+  // validate sessions, or restrict application access.
+  await pool.query('ALTER TABLE public.profiles ADD COLUMN must_change_password boolean NOT NULL DEFAULT false, ADD COLUMN password_changed_at timestamptz');
+  const prototype = readFileSync(new URL('../../../supabase/proposals/password-gate/operations.sql', import.meta.url), 'utf8');
+  await pool.query(prototype);
+  const race = async (functionName, operations) => Promise.allSettled(operations.map(async operation => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('SET LOCAL ROLE service_role');
+      await client.query(`SELECT public.${functionName}($1,$2)`, [userId, operation]);
+      await client.query('SELECT pg_sleep(0.05)');
+      await client.query('COMMIT');
+      return operation;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }));
+  const resetRace = await race('prototype_begin_password_reset', [randomUUID(), randomUUID()]);
+  const resetSucceeded = resetRace.filter(result => result.status === 'fulfilled');
+  assert.equal(resetSucceeded.length, 1);
+  const passwordService = await pool.connect();
+  try {
+    await passwordService.query('SET ROLE service_role');
+    await passwordService.query('SELECT public.prototype_finish_password_reset($1,$2)', [userId, resetSucceeded[0].value]);
+    const changeRace = await race('prototype_begin_password_change', [randomUUID(), randomUUID()]);
+    const changeSucceeded = changeRace.filter(result => result.status === 'fulfilled');
+    assert.equal(changeSucceeded.length, 1);
+    await passwordService.query('SELECT public.prototype_finish_password_change($1,$2)', [userId, changeSucceeded[0].value]);
+    await passwordService.query('SELECT public.prototype_begin_password_reset($1,$2)', [userId, randomUUID()]);
+    await assert.rejects(passwordService.query('SELECT public.prototype_finish_password_change($1,$2)', [userId, changeSucceeded[0].value]), /mismatch/);
+  } finally {
+    await passwordService.query('RESET ROLE');
+    passwordService.release();
+  }
+  console.log('PASS: prototype reset/change leases serialize concurrent operations and reject a stale completion (not a password/security integration test).');
 } finally {
   if (pool) await pool.end();
   if (databaseCreated) await control.query(`DROP DATABASE ${dbName}`);
