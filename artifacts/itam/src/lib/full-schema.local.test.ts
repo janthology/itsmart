@@ -51,6 +51,28 @@ beforeAll(async () => {
 afterAll(async () => { if (db) await db.close(); });
 
 describe('full repository migrations in isolated PostgreSQL', () => {
+  it('previews the strict three-year UTC audit cutoff for active admins without deleting anything', async () => {
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
+    await db.exec("INSERT INTO entity_change_audit(occurred_at,entity_type,entity_id,operation,new_values) VALUES ('2000-01-01 00:00:00+00','ticket','00000000-0000-4000-8000-000000000077','INSERT','{}'),('2099-01-01 00:00:00+00','ticket','00000000-0000-4000-8000-000000000078','INSERT','{}')");
+    await asUser(admin);
+    const first = await db.query<{ older_count: number }>("SELECT older_count FROM public.audit_retention_preview()");
+    expect(Number(first.rows[0].older_count)).toBe(1);
+    expect((await db.query("SELECT three_year_cutoff = (((as_of AT TIME ZONE 'UTC') - interval '3 years') AT TIME ZONE 'UTC') AS correct FROM public.audit_retention_preview()")).rows).toEqual([{ correct: true }]);
+    await asUser(support);
+    await expect(db.query('SELECT * FROM public.audit_retention_preview()')).rejects.toThrow(/Only active administrators/);
+    await asUser(general);
+    await expect(db.query('SELECT * FROM public.audit_retention_preview()')).rejects.toThrow(/Only active administrators/);
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); UPDATE profiles SET is_active=false WHERE id='" + admin + "';");
+    await asUser(admin);
+    await expect(db.query('SELECT * FROM public.audit_retention_preview()')).rejects.toThrow(/Only active administrators/);
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); UPDATE profiles SET is_active=true WHERE id='" + admin + "';");
+    const rollback = readFileSync(new URL('../../../../supabase/rollbacks/20261101000021_audit_retention_preview.sql', import.meta.url), 'utf8');
+    await db.exec(rollback);
+    expect((await db.query("SELECT count(*)::integer AS total FROM entity_change_audit WHERE entity_id IN ('00000000-0000-4000-8000-000000000077','00000000-0000-4000-8000-000000000078')")).rows).toEqual([{ total: 2 }]);
+    await db.exec(script('20261101000021_audit_retention_preview.sql'));
+    await asUser(admin);
+    expect(Number((await db.query<{older_count: number}>('SELECT older_count FROM public.audit_retention_preview()')).rows[0].older_count)).toBe(1);
+  });
   it('general user creates only open unassigned tickets, not forged lifecycle data', async () => {
     await asUser(general);
     const result = await db.query("INSERT INTO tickets(title,created_by) VALUES ('Synthetic',$1) RETURNING id,status,ticket_number", [general]);

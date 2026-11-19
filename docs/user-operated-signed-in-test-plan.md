@@ -1,6 +1,6 @@
 # User-operated signed-in Supabase checks — plan, not executed
 
-The user selected dedicated, user-operated test accounts. Do not put passwords, temporary passwords, access/refresh tokens, API keys or session cookies in chat, screenshots or test notes. These checks do not authorize a production migration, frontend or Edge Function deployment, cleanup, reset, deletion, or changes to existing business records. No test accounts or records have been created by this plan. The existing retention policy and its exact period still need to be supplied before implementing or approving an audit retention rule.
+The user selected dedicated, user-operated test accounts and reports they created all three and changed their passwords. A read-only profile/Auth metadata query confirmed active administrator, support and general-user profiles, each with a sign-in and a recorded profile password-change timestamp; it did not authenticate as them or prove server-side enforcement. Do not put passwords, temporary passwords, access/refresh tokens, API keys or session cookies in chat, screenshots or test notes. These checks do not authorize a production migration, frontend or Edge Function deployment, cleanup, reset, deletion, or changes to existing business records. The user specified audit retention of three years; deletion timing, legal holds and implementation need separate review.
 
 ## Proposed preparation — review before production changes
 

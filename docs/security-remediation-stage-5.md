@@ -1,6 +1,6 @@
 # Transactional ticket activity — locally prepared
 
-This change is **not deployed or approved for production**. Live migration versions differ from repository filenames; do not blanket `supabase db push`. The user chose user-operated dedicated test accounts and an existing audit-retention policy, but has not yet supplied the retention period or approved a specific production migration. No cleanup or reset is authorized.
+This change is **not deployed or approved for production**. Live migration versions differ from repository filenames; do not blanket `supabase db push`. The user chose user-operated dedicated test accounts and specified three-year audit retention, but has not approved a specific production migration or audit purge mechanism. No cleanup or reset is authorized.
 
 ## Scope
 
