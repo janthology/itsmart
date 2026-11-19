@@ -1,12 +1,14 @@
-# Security remediation — stage 1 review (prepared, not deployed)
+# Security remediation — stage 1 (deployed; live role checks pending)
 
 ## Status and baseline
 
-This stage is prepared for review only. No Supabase migration, rollback, Edge Function, data write or pilot reset has been applied by this work. The report-error UI change is frontend-only and still requires deployment to take effect.
+The user explicitly approved the first migration after accepting the absence of a verified backup. `ticket_and_asset_write_guards` was applied to `DOST02-ITSMART` as Supabase migration **20261119024510**. No rollback, Edge Function deployment, intentional row modification or pilot reset was performed. The report-error UI and other frontend changes remain unconfirmed as deployed.
+
+Post-apply read-only checks confirmed the enabled `a_guard_ticket_insert` trigger, updated ticket and asset function definitions, unchanged relevant policies, unchanged maintenance RPC fingerprints and six active cron jobs. Auth, database, REST, pooler and storage health checks reported healthy. Ticket/asset/history/profile counts were unchanged between immediate observations (27/26/140/12; maintenance logs 6). These checks are not proof of production role behavior: authenticated end-to-end checks are still pending, and counts do not prove row contents are unchanged. There is no verified restorable backup.
 
 The target project identified by the connector is `DOST02-ITSMART` (`rkwxdqludtdzbpuftsvi`). Read-only baseline inspection returned 27 tickets, 200 comments, 26 assets, 140 asset-history entries, 6 maintenance logs and 12 profiles; these are point-in-time counts, not a backup, and may change. No verified restorable backup was created by this work. Live migration names match the repository through `complete_maintenance_cutover`, but the live versions differ from the repository filenames. Do not run a blanket `supabase db push` or migration-history repair without a separately reviewed reconciliation.
 
-The observed live `pg_get_functiondef` MD5 fingerprints at preparation time were:
+The observed live `pg_get_functiondef` MD5 fingerprints before deployment were:
 
 | Function | MD5 |
 | --- | --- |
@@ -15,7 +17,7 @@ The observed live `pg_get_functiondef` MD5 fingerprints at preparation time were
 | `touch_ticket_last_activity` | `46496d95ce4f7cc2d98782e5fa492217` |
 | `validate_asset_pm_dates` | `f9493e889b51df1f9fa4bd119477bfc1` |
 
-Recheck these, relevant triggers, grants and policies immediately before a future deployment. A mismatch means stop and review, not overwrite. MD5 here is a drift fingerprint, not a security signature or a substitute for comparing definitions. Read-only inspection found no currently resolved or closed ticket with an open `on_hold_at`; recheck before rollout.
+These describe the **pre-deployment** state; relevant triggers, grants and policies must be rechecked immediately before any future deployment. A mismatch means stop and review, not overwrite. MD5 here is a drift fingerprint, not a security signature or a substitute for comparing definitions. Read-only inspection found no currently resolved or closed ticket with an open `on_hold_at`; recheck before rollout.
 
 ## Prepared change
 
@@ -34,13 +36,23 @@ The test model is a simplified isolated PostgreSQL/PGlite schema that uses the a
 
 This is stronger than the earlier reduced-schema test, but it is **not** the Supabase stack: Auth is a stub (no GoTrue/JWT authentication), cron schedules do not execute, publication is not real Realtime, and the PostgREST gateway, hosted extensions, concurrent multi-session behavior and cloud configuration are not tested. The repository schema may also differ from live. It is not a backup or a verified restore.
 
-## Prerequisites and cutover proposal
+## Original prerequisites and cutover proposal (historical)
 
-1. Obtain and verify a restorable backup, including Auth and database data; confirm owner and restoration procedure. Do not treat row counts, migration files or this document as a backup.
+1. Originally recommended: obtain and verify a restorable backup, including Auth and database data; confirm owner and restoration procedure. Do not treat row counts, migration files or this document as a backup.
 2. Test the migration and rollback in an isolated production-like Supabase environment using disposable accounts for every role, including existing frontend flows, comment triggers, notification creation, auto-close, maintenance, deactivated users and service-role/cron operations. A Supabase branch was previously unavailable on the current plan. If full staging remains unavailable, document that limitation and obtain an explicit risk decision rather than claiming a full integration test.
 3. Recheck live definitions/fingerprints, applied migration names, row invariants and deployed frontend. Ensure no resolved/closed legacy records with an open hold require special handling. Obtain explicit approval for the exact migration and rollback.
 4. Apply the reviewed migration through a controlled, transactional management migration only after approval; do not use the mismatched repository history as an automatic push. Record the resulting remote version and verify that policies, triggers and intended role actions still work. Do not alter existing records to make tests pass.
 5. Monitor application errors and user reports; ask users with stale sessions to reload if needed. Report the result and leave the pilot reset on hold.
+
+## Post-deployment identifiers
+
+| Function | Post-deployment MD5 |
+| --- | --- |
+| `guard_ticket_insert` | `203db2f2ccb81e8aab14992d066ac71c` |
+| `guard_ticket_update` | `d1ff5837272ff3fe4fb27449a0d697c0` |
+| `validate_asset_pm_dates` | `c71ab09a1e63a97e5afbd09b78df42a7` |
+
+Existing ticket-number, last-activity and maintenance RPC fingerprints matched their pre-deployment values. The recorded pre-deployment hashes above and rollback source do not prove all production objects are restorable.
 
 ## Rollback
 

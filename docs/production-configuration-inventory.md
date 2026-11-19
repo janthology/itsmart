@@ -1,6 +1,6 @@
 # Production configuration inventory (read-only)
 
-This is a point-in-time reference, **not a backup**, restore image, complete schema dump, or proof that repository definitions match production. It contains no user records, credentials or secrets. Configurations may change; recheck them immediately before a deployment. Managed Auth/Storage schemas, all grants, extensions, external services, secrets and project settings are not exhaustively inventoried. Hashes identify observed definitions but cannot restore them. Never apply repository migration files wholesale to production.
+This captures the **pre-stage-one-migration** configuration as a point-in-time reference, **not a backup**, restore image, complete schema dump, or proof that repository definitions match production. It contains no user records, credentials or secrets. Configurations may change; recheck them immediately before a deployment. Managed Auth/Storage schemas, all grants, extensions, external services, secrets and project settings are not exhaustively inventoried. Hashes identify observed definitions but cannot restore them. Never apply repository migration files wholesale to production.
 
 ## Deployment and project
 
@@ -95,3 +95,7 @@ validate_asset_pm_dates() f9493e889b51df1f9fa4bd119477bfc1
 ```
 
 Public non-internal trigger inventory: asset_history `skip_false_maintenance_unassignment`; assets `trg_notify_asset_assigned`, `update_assets_updated_at`, `validate_asset_pm_dates`; profiles `on_profile_role_change`, `trg_guard_profile_update`, `update_profiles_updated_at`; ticket_comments `trg_notify_ticket_comment`, `trg_touch_ticket_on_comment`; tickets `set_ticket_number`, `trg_guard_ticket_update`, `trg_notify_ticket_assigned`, `trg_notify_ticket_update`, `trg_touch_ticket_last_activity`, `update_tickets_updated_at`. Managed-schema triggers were not inventoried here.
+
+## Subsequent change: first guard migration
+
+After the user approved proceeding without a verified backup, `ticket_and_asset_write_guards` was applied as version `20261119024510`. See `security-remediation-stage-1.md` for post-apply fingerprints, verification limits and rollback. The policy names and cron schedule listed above remained unchanged during post-apply checks; the trigger and function inventory above reflects the earlier baseline, not the new guard.

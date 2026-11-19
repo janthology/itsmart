@@ -8,7 +8,7 @@ The audit reviewed the checked-in application, Edge Functions and migrations at 
 
 ## Remediation status
 
-A ticket/asset guard migration is prepared but **not deployed**; see `docs/security-remediation-stage-1.md`. The report error-state fix, ticket partial-success reporting, and create-user partial-failure mitigation are implemented locally but not confirmed deployed. Ticket audit writes remain non-atomic, Auth/profile operations are not transactional, and a trusted mandatory-password-change enforcement design is still open. All other findings below remain open.
+The ticket/asset guard migration was applied as production version `20261119024510`; read-only configuration and health checks passed, but authenticated end-to-end verification remains pending. See `docs/security-remediation-stage-1.md`. The report error-state fix, ticket partial-success reporting, and create-user partial-failure mitigation are implemented locally but not confirmed deployed. Ticket audit writes remain non-atomic, Auth/profile operations are not transactional, and a trusted mandatory-password-change enforcement design is still open. All other findings below remain open.
 
 ## Priority findings
 
