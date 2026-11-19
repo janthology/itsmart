@@ -335,9 +335,9 @@ for (const outcome of ['zero rows', 'network error'] as const) {
     await page.goto(`/tickets/${ticketId}`);
     await page.getByRole('combobox').first().click();
     await page.getByRole('option', { name: /In progress/i }).click();
-    await expect(page.getByText('Could not confirm the status update. Check the refreshed ticket before retrying.')).toBeVisible();
+    await expect(page.getByText('Could not confirm the status update. Check the refreshed ticket before retrying.', { exact: true })).toBeVisible();
     expect(comments).toBe(0);
-    expect(reads).toBeGreaterThanOrEqual(3);
+    await expect.poll(() => reads).toBeGreaterThanOrEqual(3);
   });
 }
 
@@ -413,6 +413,59 @@ test('successful user creation displays the one-time password', async ({ page })
   await expect(page.getByText('SyntheticPassword2!', { exact: true })).toBeVisible();
   await expect(page.getByRole('alert').filter({ hasText: 'User creation needs review' })).toHaveCount(0);
 });
+
+async function selectUserAndReset(page: Page) {
+  await page.goto('/admin/users');
+  await page.getByRole('button', { name: /Synthetic User.*General User/i }).click();
+  await page.getByRole('button', { name: 'Reset password', exact: true }).click();
+  const dialog = page.getByRole('alertdialog');
+  await dialog.getByRole('button', { name: 'Reset password', exact: true }).click();
+}
+
+for (const failure of ['profile_unconfirmed', 'reset_unconfirmed', 'lost_response', 'missing_password'] as const) {
+  test(`password reset ${failure} warns and does not silently retry`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    let attempts = 0;
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    await page.route('**/functions/v1/reset-password', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      attempts++;
+      if (failure === 'lost_response') return route.abort('failed');
+      if (failure === 'missing_password') return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify({ success: true }) });
+      return route.fulfill({ status: 503, headers, contentType: 'application/json', body: JSON.stringify({ code: failure }) });
+    });
+    await selectUserAndReset(page);
+    const warning = page.getByRole('alert').filter({ hasText: 'Password reset needs review: Synthetic User' });
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText(failure === 'profile_unconfirmed' ? 'did not attempt' : 'may have changed');
+    expect(attempts).toBe(1);
+    await page.getByRole('button', { name: 'Reset password', exact: true }).click();
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Reset password', exact: true }).click();
+    await expect(page.getByText('Check the account first', { exact: true })).toBeVisible();
+    expect(attempts).toBe(1);
+    await warning.getByRole('button', { name: 'I checked; allow password retry' }).click();
+    await expect(warning).toHaveCount(0);
+  });
+}
+
+for (const profileFlag of ['confirmed', 'unconfirmed'] as const) {
+  test(`successful password reset keeps password visible and flags ${profileFlag} status`, async ({ page }) => {
+    await syntheticSession(page, 'administrator');
+    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+    await page.route('**/functions/v1/reset-password', async route => {
+      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+      return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify({ success: true, temporaryPassword: 'SyntheticPassword2!', profileFlag, sessionRevocation: 'unverified' }) });
+    });
+    await selectUserAndReset(page);
+    await expect(page.getByText('SyntheticPassword2!', { exact: true })).toBeVisible();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('alert')).toContainText('Session revocation is not verified');
+    if (profileFlag === 'unconfirmed') await expect(dialog.getByRole('alert')).toContainText('password-change flag could not be confirmed');
+    else await expect(dialog.getByRole('alert')).not.toContainText('password-change flag could not be confirmed');
+    await dialog.getByRole('button', { name: 'Done' }).click();
+    if (profileFlag === 'unconfirmed') await expect(page.getByRole('alert').filter({ hasText: 'Password reset needs review' })).toBeVisible();
+  });
+}
 
 test('report fetch failure displays retry and prevents export until recovered', async ({ page }) => {
   await syntheticSession(page, 'general_user');

@@ -33,11 +33,12 @@ export default function UsersManagement() {
   const [roleFilter, setRoleFilter] = useState<UserRoleFilter>("all");
   const [page, setPage] = useState(1);
   const [resettingId, setResettingId] = useState<string | null>(null);
+  const [resetWarnings, setResetWarnings] = useState<{ id: string; name: string; message: string }[]>([]);
   // One-time temporary password returned by create-user / reset-password.
   // Shown exactly once in a dialog, then cleared from state — it is never
   // persisted anywhere in the UI.
   const [tempPasswordInfo, setTempPasswordInfo] = useState<
-    { name: string; password: string; action: "created" | "reset" } | null
+    { name: string; password: string; action: "created" | "reset"; profileFlagUnconfirmed?: boolean } | null
   >(null);
   const [copiedTemp, setCopiedTemp] = useState(false);
   const [addUserOpen, setAddUserOpen] = useState(false);
@@ -157,38 +158,64 @@ export default function UsersManagement() {
   };
 
   const handleResetPassword = async (id: string) => {
+    if (id === user?.id) {
+      toast({ variant: "destructive", title: "Use Change Password", description: "For your own account, use the Change Password page." });
+      return;
+    }
+    if (resettingId || resetWarnings.some(w => w.id === id)) {
+      toast({ variant: "destructive", title: "Check the account first", description: "Review the password reset warning before retrying." });
+      return;
+    }
+    const name = allUsers.find((u) => u.id === id)?.fullName ?? "User";
+    const flagWarning = (message: string) => {
+      setResetWarnings(previous => [...previous.filter(w => w.id !== id), { id, name, message }]);
+      void queryClient.invalidateQueries({ queryKey: ["users"] });
+    };
     setResettingId(id);
+    let requestStarted = false;
+    let resultHandled = false;
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error("Your session has expired. Sign in again.");
+      requestStarted = true;
       const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/reset-password`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session?.access_token}`,
+          Authorization: `Bearer ${session.access_token}`,
           apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
         },
         body: JSON.stringify({ userId: id }),
       });
-      const result = await res.json().catch(() => ({ error: res.statusText }));
+      const result = await res.json();
       if (!res.ok) {
-        throw new Error(result.error || "Failed to reset password");
+        resultHandled = true;
+        if (res.status === 401 || res.status === 403 || result.code === "self_reset_forbidden") {
+          throw new Error(result.error || "Not authorized to reset this password.");
+        }
+        flagWarning(result.code === "profile_unconfirmed"
+          ? "The account flag could not be confirmed. The new function did not attempt the password reset; check the profile before retrying."
+          : "The reset could not be confirmed. The password may have changed and the account flag may be set. Check the account before retrying.");
+        return;
       }
-      // The reset-password Edge Function flags must_change_password and
-      // revokes the user's sessions server-side. It returns a fresh one-time
-      // temporary password, shown exactly once below.
-      const target = allUsers.find((u) => u.id === id);
+      if (typeof result.temporaryPassword !== "string" || !result.temporaryPassword) {
+        resultHandled = true;
+        flagWarning("The response contained no temporary password. The password may have changed. Check the account before retrying.");
+        return;
+      }
+      resultHandled = true;
       logAdminAction("user.password_reset", "user", id);
-      if (result.temporaryPassword) {
-        setTempPasswordInfo({ name: target?.fullName ?? "User", password: result.temporaryPassword, action: "reset" });
-      } else {
-        toast({
-          title: "Password reset",
-          description: "The user will be prompted to change their password on next login.",
-        });
+      setTempPasswordInfo({ name, password: result.temporaryPassword, action: "reset", profileFlagUnconfirmed: result.profileFlag !== "confirmed" });
+      if (result.profileFlag !== "confirmed") {
+        flagWarning("The password was reset, but the password-change flag could not be confirmed. Check the account profile before allowing use.");
       }
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to reset password.";
-      toast({ variant: "destructive", title: "Error", description: message });
+      if (requestStarted && !resultHandled) {
+        flagWarning("The response was lost or unreadable. The password may have changed and the account flag may be set. Check the account before retrying.");
+      } else {
+        const message = e instanceof Error ? e.message : "Failed to reset password.";
+        toast({ variant: "destructive", title: "Error", description: message });
+      }
     } finally {
       setResettingId(null);
     }
@@ -235,6 +262,15 @@ export default function UsersManagement() {
             <UserPlus className="w-4 h-4 mr-1.5" /> Add user
           </Button>
         </PageHeader>
+
+        {resetWarnings.map(warning => (
+          <div key={warning.id} role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">Password reset needs review: {warning.name}</p>
+            <p>{warning.message}</p>
+            <p className="mt-1">The temporary password cannot be recovered from this warning. This warning is not saved if you leave the page.</p>
+            <Button variant="outline" size="sm" className="mt-2" onClick={() => setResetWarnings(previous => previous.filter(w => w.id !== warning.id))}>I checked; allow password retry</Button>
+          </div>
+        ))}
 
         {creationWarning && !addUserOpen && (
           <div role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
@@ -354,10 +390,17 @@ export default function UsersManagement() {
                 {tempPasswordInfo?.action === "reset"
                   ? `The password for ${tempPasswordInfo?.name} has been reset.`
                   : `${tempPasswordInfo?.name} has been added.`}{" "}
-                Give them this one-time temporary password — they will be required to change it
-                when they sign in.
+                Give them this one-time temporary password. {tempPasswordInfo?.profileFlagUnconfirmed
+                  ? "Confirm the password-change flag before relying on the app prompt."
+                  : "The app is intended to prompt them to change it when they sign in."}
               </DialogDescription>
             </DialogHeader>
+            {tempPasswordInfo?.action === "reset" && (
+              <p role="alert" className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-800 dark:border-amber-800/50 dark:bg-amber-900/10 dark:text-amber-300">
+                {tempPasswordInfo.profileFlagUnconfirmed && "The password-change flag could not be confirmed; check the user's profile. "}
+                Session revocation is not verified; existing access tokens may remain valid until they expire.
+              </p>
+            )}
             <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3">
               <code className="min-w-0 break-all font-mono text-sm font-semibold text-foreground">
                 {tempPasswordInfo?.password}

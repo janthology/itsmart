@@ -13,7 +13,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // CSPRNG with at least one character per class, satisfying the app's
 // password rules. It is returned to the calling administrator exactly once
 // in this response; only its hash is ever stored (by GoTrue), and the
-// account is flagged must_change_password so it cannot be kept. Ambiguous
+// account is flagged for the app password-change prompt. The flag is not
+// yet a trusted server-side access boundary. Ambiguous
 // characters (0/O, 1/l/I) are excluded so it can be relayed verbally.
 function generateTemporaryPassword(length = 20): string {
   const sets = [
@@ -56,19 +57,6 @@ function serviceRoleKey() {
     return keys.default ?? Object.values(keys)[0] ?? ''
   } catch {
     return ''
-  }
-}
-
-async function readError(response: Response, fallback: string) {
-  try {
-    const data = await response.json() as {
-      error?: string
-      message?: string
-      msg?: string
-    }
-    return data.error ?? data.message ?? data.msg ?? fallback
-  } catch {
-    return fallback
   }
 }
 
@@ -144,79 +132,77 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(400, { error: 'Valid userId UUID is required' })
     }
 
-    const temporaryPassword = generateTemporaryPassword()
-
-    const resetResponse = await fetch(
-      `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`,
-      {
-        method: 'PUT',
-        headers: {
-          apikey: serviceKey,
-          Authorization: `Bearer ${serviceKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ password: temporaryPassword }),
-      },
-    )
-    if (!resetResponse.ok) {
-      return jsonResponse(400, {
-        error: await readError(resetResponse, 'Failed to reset password'),
-      })
+    // Resetting one's own Auth password can invalidate the administrator's
+    // session before the one-time password is delivered. Use the self-service
+    // password-change flow instead.
+    if (userId === caller.id) {
+      return jsonResponse(400, { code: 'self_reset_forbidden', error: 'Use Change Password for your own account.' })
     }
 
+    // Set and verify the profile flag *before* touching Auth. This prevents
+    // returning an error with a changed password solely because this later
+    // profile write failed. It is still not an atomic Auth/profile operation.
     const profileUrl = new URL(`${supabaseUrl}/rest/v1/profiles`)
     profileUrl.searchParams.set('id', `eq.${userId}`)
-
-    const profileResponse = await fetch(profileUrl, {
-      method: 'PATCH',
-      headers: {
-        apikey: serviceKey,
-        Authorization: `Bearer ${serviceKey}`,
-        'Content-Type': 'application/json',
-        Prefer: 'return=representation',
-      },
-      body: JSON.stringify({ must_change_password: true }),
-    })
-    if (!profileResponse.ok) {
-      return jsonResponse(500, {
-        error: await readError(
-          profileResponse,
-          'Password reset, but failed to flag the account for a password change',
-        ),
-      })
-    }
-
-    const updatedProfiles = await profileResponse.json() as unknown[]
-    if (updatedProfiles.length !== 1) {
-      return jsonResponse(404, { error: 'User profile not found' })
-    }
-
-    // Revoke the target's existing sessions so the old password's sessions
-    // cannot keep working after the reset. Skipped when an admin resets
-    // their own password (it would sign them out mid-task). Best-effort:
-    // a failure here must not fail the reset itself — the account is still
-    // flagged must_change_password, which the app enforces at login and,
-    // via the profiles realtime subscription, mid-session.
-    if (userId !== caller.id) {
+    profileUrl.searchParams.set('select', 'id,must_change_password')
+    const setProfileFlag = async (): Promise<boolean> => {
       try {
-        await fetch(
-          `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}/sessions`,
-          {
-            method: 'DELETE',
-            headers: {
-              apikey: serviceKey,
-              Authorization: `Bearer ${serviceKey}`,
-            },
+        const profileResponse = await fetch(profileUrl, {
+          method: 'PATCH',
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+            'Content-Type': 'application/json',
+            Prefer: 'return=representation',
           },
-        )
+          body: JSON.stringify({ must_change_password: true }),
+        })
+        if (!profileResponse.ok) return false
+        const profiles = await profileResponse.json() as Array<{ id?: string; must_change_password?: boolean }>
+        return Array.isArray(profiles) && profiles.length === 1 && profiles[0]?.id === userId && profiles[0]?.must_change_password === true
       } catch {
-        // Non-fatal — see comment above.
+        // The write may have committed despite a lost response.
+        return false
       }
     }
+    if (!await setProfileFlag()) {
+      return jsonResponse(503, { code: 'profile_unconfirmed', error: 'Account flag could not be confirmed. Password reset was not attempted; check the profile before retrying.' })
+    }
 
-    // The temporary password is returned only here, only to the verified
-    // administrator caller, and is never logged or stored in plaintext.
-    return jsonResponse(200, { success: true, temporaryPassword })
+    const temporaryPassword = generateTemporaryPassword()
+    let resetResponse: Response
+    try {
+      resetResponse = await fetch(
+        `${supabaseUrl}/auth/v1/admin/users/${encodeURIComponent(userId)}`,
+        {
+          method: 'PUT',
+          headers: {
+            apikey: serviceKey,
+            Authorization: `Bearer ${serviceKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ password: temporaryPassword }),
+        },
+      )
+    } catch {
+      // Auth might have committed despite a lost response. Never tell the
+      // caller the old password is still valid or retry the change silently.
+      return jsonResponse(503, { code: 'reset_unconfirmed', error: 'Password reset could not be confirmed. The password may have changed and the account is flagged; check the account before retrying.' })
+    }
+    if (!resetResponse.ok) {
+      return jsonResponse(503, { code: 'reset_unconfirmed', error: 'Password reset could not be confirmed. The password may have changed and the account is flagged; check the account before retrying.' })
+    }
+
+    // The user could change their profile during the Auth request. Attempt to
+    // flag it again. A failed response after Auth success must never discard
+    // the new password: return it with an explicit recovery warning instead.
+    const profileFlag = await setProfileFlag() ? 'confirmed' : 'unconfirmed'
+
+    // Do not claim that an undocumented /admin/users/{id}/sessions DELETE
+    // revoked sessions. Existing access tokens can remain valid until expiry;
+    // real session behavior must be verified on a compatible Supabase stack.
+    // Only the verified administrator receives the one-time password.
+    return jsonResponse(200, { success: true, temporaryPassword, profileFlag, sessionRevocation: 'unverified' })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
     return jsonResponse(500, { error: message })

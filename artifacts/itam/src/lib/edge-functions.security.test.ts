@@ -51,38 +51,80 @@ for (const name of ['create-user', 'reset-password'] as const) {
   });
 }
 
-describe('reset-password partial failures', () => {
-  it('characterizes a profile failure after Auth already accepted a new password', async () => {
-    let authUpdated = false;
+describe('reset-password failure handling', () => {
+  const flag = { id: target, must_change_password: true };
+  const setup = (options: { firstFlag?: Response | Error; secondFlag?: Response | Error; auth?: Response | Error } = {}) => {
+    let patches = 0;
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/auth/v1/user')) return json({ id: caller });
       if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
-      if (url.includes('/auth/v1/admin/users/') && init?.method === 'PUT') { authUpdated = true; return json({ id: target }); }
-      if (url.includes('/rest/v1/profiles') && init?.method === 'PATCH') return json({ message: 'Synthetic failure' }, 500);
-      throw new Error('unexpected request');
+      let result: Response | Error;
+      if (url.includes('/rest/v1/profiles') && init?.method === 'PATCH') {
+        patches++;
+        result = (patches === 1 ? options.firstFlag : options.secondFlag) ?? json([flag]);
+      } else if (url.includes('/auth/v1/admin/users/') && init?.method === 'PUT') result = options.auth ?? json({ id: target });
+      else throw new Error('unexpected privileged request');
+      if (result instanceof Error) throw result;
+      return result;
     });
-    const response = await loadFunction('reset-password', fetch as unknown as typeof globalThis.fetch)(request({ userId: target }));
-    expect(authUpdated).toBe(true);
-    expect(response.status).toBe(500);
-    expect(await response.json()).not.toHaveProperty('temporaryPassword');
+    return { fetch, handler: loadFunction('reset-password', fetch as unknown as typeof globalThis.fetch) };
+  };
+  it('verifies the flag before and after the Auth change, without claiming session revocation', async () => {
+    const { handler, fetch } = setup();
+    const response = await handler(request({ userId: target }));
+    const payload = await response.json();
+    expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ success: true, profileFlag: 'confirmed', sessionRevocation: 'unverified' });
+    expect(payload.temporaryPassword).toHaveLength(20);
+    expect(fetch.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual(['GET', 'GET', 'PATCH', 'PUT', 'PATCH']);
     expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/sessions'))).toBe(false);
   });
-  it('characterizes an unsuccessful session revocation response being ignored', async () => {
-    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input);
-      if (url.endsWith('/auth/v1/user')) return json({ id: caller });
-      if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
-      if (url.includes('/auth/v1/admin/users/') && init?.method === 'PUT') return json({ id: target });
-      if (url.includes('/rest/v1/profiles') && init?.method === 'PATCH') return json([{ id: target }]);
-      if (url.endsWith('/sessions')) return json({ message: 'Synthetic rejection' }, 500);
-      throw new Error('unexpected request');
-    });
-    const response = await loadFunction('reset-password', fetch as unknown as typeof globalThis.fetch)(request({ userId: target }));
-    expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.success).toBe(true);
-    expect(data.temporaryPassword).toHaveLength(20);
+  it('rejects resetting the caller’s own account without touching it', async () => {
+    const { handler, fetch } = setup();
+    const response = await handler(request({ userId: caller }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'self_reset_forbidden' });
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'PATCH' || init?.method === 'PUT')).toBe(false);
+  });
+  it.each([
+    ['zero rows', () => json([])],
+    ['wrong ID', () => json([{ ...flag, id: caller }])],
+    ['wrong flag', () => json([{ ...flag, must_change_password: false }])],
+    ['rejected request', () => json({}, 500)],
+    ['lost response', () => new Error('network failure')],
+    ['invalid JSON', () => new Response('bad JSON')],
+  ])('does not change the password if the first flag response is %s', async (_label, response) => {
+    const { handler, fetch } = setup({ firstFlag: response() });
+    const result = await handler(request({ userId: target }));
+    expect(result.status).toBe(503);
+    expect(await result.json()).toMatchObject({ code: 'profile_unconfirmed' });
+    expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
+  });
+  it.each([
+    ['server error', () => json({}, 500)],
+    ['validation error', () => json({}, 400)],
+    ['lost response', () => new Error('network failure')],
+  ])('does not claim reset failure is reversible after %s', async (_label, response) => {
+    const { handler, fetch } = setup({ auth: response() });
+    const result = await handler(request({ userId: target }));
+    expect(result.status).toBe(503);
+    const payload = await result.json();
+    expect(payload).toMatchObject({ code: 'reset_unconfirmed' });
+    expect(payload).not.toHaveProperty('temporaryPassword');
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+  });
+  it.each([
+    ['server error', () => json({}, 500)],
+    ['zero rows', () => json([])],
+    ['lost response', () => new Error('network failure')],
+  ])('returns the temporary password with a warning after Auth succeeds and flag recheck has %s', async (_label, response) => {
+    const { handler } = setup({ secondFlag: response() });
+    const result = await handler(request({ userId: target }));
+    expect(result.status).toBe(200);
+    const payload = await result.json();
+    expect(payload).toMatchObject({ profileFlag: 'unconfirmed', sessionRevocation: 'unverified' });
+    expect(payload.temporaryPassword).toHaveLength(20);
   });
 });
 
