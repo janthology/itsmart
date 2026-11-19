@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
-import * as XLSX from "xlsx";
+import readExcelFile from "read-excel-file/node";
 
 // The CI build uses example.supabase.co. Intercept it completely so this test
 // uses synthetic records and cannot read from or write to a real project.
@@ -65,10 +65,12 @@ test("performance preview and exports agree on hold time, boundaries and direct 
   const [xlsxDownload] = await Promise.all([
     page.waitForEvent("download"), page.getByRole("button", { name: /Excel/ }).click(),
   ]);
-  const workbook = XLSX.read(await readFile(await xlsxDownload.path()));
-  expect(workbook.SheetNames).toEqual(["Performance", "Notes"]);
-  const excelRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.Performance, { defval: "" });
-  expect(excelRows.map((r) => [r["Resolution Time (h)"], r["SLA Status"]])).toEqual([
+  const workbook = await readExcelFile(await readFile(await xlsxDownload.path()));
+  expect(workbook.map(sheet => sheet.sheet)).toEqual(["Performance", "Notes"]);
+  const [header, ...excelRows] = workbook[0].data;
+  const resolutionColumn = header.indexOf("Resolution Time (h)");
+  const statusColumn = header.indexOf("SLA Status");
+  expect(excelRows.map((r) => [r[resolutionColumn] ?? "", r[statusColumn]])).toEqual([
     [6, "Met"], [8, "Breached"], ["", "Closed without resolution"], ["", "Pending"],
   ]);
   const [pdfDownload] = await Promise.all([

@@ -2,11 +2,11 @@ import { format, parseISO } from "date-fns";
 import { getPerformanceSLA } from "./performance-sla";
 import { computeDepreciation } from "./depreciation";
 
-// xlsx and jsPDF are heavy (~1 MB combined) and only needed when a user
-// actually exports a report, so they are loaded on demand instead of
-// being part of the app bundle everyone downloads at startup.
-async function loadXlsx() {
-  return import("xlsx");
+// Report writers are loaded on demand, not in the initial application bundle.
+import { spreadsheetRows } from "./spreadsheet";
+async function writeSpreadsheet(sheets: { sheet: string; data: ReturnType<typeof spreadsheetRows> }[], filename: string) {
+  const { default: writeExcelFile } = await import("write-excel-file/browser");
+  await writeExcelFile(sheets).toFile(filename);
 }
 
 async function loadPdf() {
@@ -41,7 +41,6 @@ function finalizePdf(doc: any) {
 // ─── Assets ──────────────────────────────────────────────────────────────────
 
 export async function exportAssetsXlsx(assets: any[]) {
-  const XLSX = await loadXlsx();
   const rows = assets.map((a) => ({
     "Asset Tag": a.assetTag,
     "Name": a.name,
@@ -58,10 +57,7 @@ export async function exportAssetsXlsx(assets: any[]) {
     "Created At": format(new Date(a.createdAt), "yyyy-MM-dd"),
   }));
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Assets");
-  XLSX.writeFile(wb, `assets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Assets", data: spreadsheetRows(rows) }], `assets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportAssetsPdf(assets: any[], filters: { status?: string; from?: string; to?: string } = {}) {
@@ -108,7 +104,6 @@ export async function exportAssetsPdf(assets: any[], filters: { status?: string;
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
 export async function exportTicketsXlsx(tickets: any[]) {
-  const XLSX = await loadXlsx();
   const rows = tickets.map((t) => ({
     "Ticket No.": (t as any).ticketNumber ?? t.id.substring(0, 8),
     "Title": t.title,
@@ -123,10 +118,7 @@ export async function exportTicketsXlsx(tickets: any[]) {
     "Closed At": t.closedAt ? format(new Date(t.closedAt), "yyyy-MM-dd HH:mm") : "",
   }));
 
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Tickets");
-  XLSX.writeFile(wb, `tickets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Tickets", data: spreadsheetRows(rows) }], `tickets-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportTicketsPdf(tickets: any[], filters: { status?: string; priority?: string; from?: string; to?: string } = {}) {
@@ -174,7 +166,6 @@ export async function exportTicketsPdf(tickets: any[], filters: { status?: strin
 // ─── Asset Assignment / History Report ───────────────────────────────────────
 
 export async function exportAssetHistoryXlsx(history: any[]) {
-  const XLSX = await loadXlsx();
   const rows = history.map((h) => ({
     "Asset Tag": h.assetTag ?? "",
     "Asset Name": h.assetName ?? "",
@@ -185,10 +176,7 @@ export async function exportAssetHistoryXlsx(history: any[]) {
     "Changed By": h.changedBy?.fullName ?? "",
     "Date": format(new Date(h.createdAt), "yyyy-MM-dd HH:mm"),
   }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Asset History");
-  XLSX.writeFile(wb, `asset-history-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Asset History", data: spreadsheetRows(rows) }], `asset-history-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportAssetHistoryPdf(history: any[], filters: { from?: string; to?: string } = {}) {
@@ -226,7 +214,6 @@ export async function exportAssetHistoryPdf(history: any[], filters: { from?: st
 // ─── Ticket Resolution Performance Report ────────────────────────────────────
 
 export async function exportTicketPerformanceXlsx(tickets: any[]) {
-  const XLSX = await loadXlsx();
   const rows = tickets.map((t) => {
     const sla = getPerformanceSLA(t);
     return {
@@ -244,17 +231,15 @@ export async function exportTicketPerformanceXlsx(tickets: any[]) {
       "SLA Status": sla.status,
     };
   });
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Performance");
-  const notes = XLSX.utils.aoa_to_sheet([
-    ["SLA report notes"],
-    ["Resolution Time (h) excludes time on hold and is rounded to two decimals for display."],
-    ["SLA outcomes are determined using unrounded active hours."],
-    ["Closed without resolution tickets are separate from Met, Breached, and Pending."],
-  ]);
-  XLSX.utils.book_append_sheet(wb, notes, "Notes");
-  XLSX.writeFile(wb, `ticket-performance-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([
+    { sheet: "Performance", data: spreadsheetRows(rows) },
+    { sheet: "Notes", data: [
+      ["SLA report notes"],
+      ["Resolution Time (h) excludes time on hold and is rounded to two decimals for display."],
+      ["SLA outcomes are determined using unrounded active hours."],
+      ["Closed without resolution tickets are separate from Met, Breached, and Pending."],
+    ] },
+  ], `ticket-performance-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportTicketPerformancePdf(tickets: any[], filters: { from?: string; to?: string } = {}) {
@@ -308,7 +293,6 @@ export async function exportTicketPerformancePdf(tickets: any[], filters: { from
 // ─── User Activity Report ─────────────────────────────────────────────────────
 
 export async function exportUserActivityXlsx(users: any[]) {
-  const XLSX = await loadXlsx();
   const rows = users.map((u) => ({
     "Full Name": u.fullName,
     "Email": u.email ?? "",
@@ -320,10 +304,7 @@ export async function exportUserActivityXlsx(users: any[]) {
     "Tickets Resolved": u.ticketsResolved ?? 0,
     "Joined": format(new Date(u.createdAt), "yyyy-MM-dd"),
   }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "User Activity");
-  XLSX.writeFile(wb, `user-activity-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "User Activity", data: spreadsheetRows(rows) }], `user-activity-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportUserActivityPdf(users: any[]) {
@@ -358,7 +339,6 @@ export async function exportUserActivityPdf(users: any[]) {
 // ─── Unassigned Assets Report ─────────────────────────────────────────────────
 
 export async function exportUnassignedAssetsXlsx(assets: any[]) {
-  const XLSX = await loadXlsx();
   const rows = assets.map((a) => ({
     "Asset Tag": a.assetTag,
     "Name": a.name,
@@ -370,10 +350,7 @@ export async function exportUnassignedAssetsXlsx(assets: any[]) {
     "Purchase Date": a.purchaseDate ? format(new Date(a.purchaseDate), "yyyy-MM-dd") : "",
     "Purchase Value (₱)": a.purchaseValue ?? "",
   }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Unassigned Assets");
-  XLSX.writeFile(wb, `unassigned-assets-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Unassigned Assets", data: spreadsheetRows(rows) }], `unassigned-assets-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportUnassignedAssetsPdf(assets: any[]) {
@@ -406,7 +383,6 @@ export async function exportUnassignedAssetsPdf(assets: any[]) {
 const USEFUL_LIFE_YEARS = 5; // straight-line over 5 years
 
 export async function exportDepreciationXlsx(assets: any[]) {
-  const XLSX = await loadXlsx();
   const rows = assets
     .filter((a) => a.purchaseValue != null && a.purchaseDate)
     .map((a) => {
@@ -426,10 +402,7 @@ export async function exportDepreciationXlsx(assets: any[]) {
         "% Depreciated": d?.pctDepreciated ?? "",
       };
     });
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Depreciation");
-  XLSX.writeFile(wb, `asset-depreciation-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Depreciation", data: spreadsheetRows(rows) }], `asset-depreciation-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportDepreciationPdf(assets: any[]) {
@@ -468,7 +441,6 @@ export async function exportDepreciationPdf(assets: any[]) {
 // ─── Ticket Satisfaction Summary ──────────────────────────────────────────────
 
 export async function exportSatisfactionXlsx(tickets: any[]) {
-  const XLSX = await loadXlsx();
   const rated = tickets.filter((t) => t.satisfactionRating != null);
   const rows = rated.map((t) => ({
     "Ticket No.": t.ticketNumber ?? t.id.substring(0, 8),
@@ -480,10 +452,7 @@ export async function exportSatisfactionXlsx(tickets: any[]) {
     "Rating (1-5)": t.satisfactionRating,
     "Comment": t.satisfactionComment ?? "",
   }));
-  const ws = XLSX.utils.json_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Satisfaction");
-  XLSX.writeFile(wb, `satisfaction-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
+  await writeSpreadsheet([{ sheet: "Satisfaction", data: spreadsheetRows(rows) }], `satisfaction-report-${format(new Date(), "yyyyMMdd")}.xlsx`);
 }
 
 export async function exportSatisfactionPdf(tickets: any[]) {

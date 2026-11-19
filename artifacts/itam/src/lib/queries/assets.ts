@@ -83,29 +83,37 @@ export function useGetAsset(id: string) {
   });
 }
 
+export type AssetCreationData = Omit<CreateAssetRequest, 'assetTag'> & {
+  serialNumber?: string | null; location?: string | null; model?: string | null;
+  purchaseValue?: number | null; lastPmDate?: string | null; nextPmDate?: string | null; pmRequired?: boolean;
+};
+
+// Keep the normalized payload stable so retries can use the same request ID.
+export function assetCreationPayload(data: AssetCreationData) {
+  return {
+    name: data.name, category: data.category, status: data.status,
+    assigned_to: data.assignedToId ?? null, purchase_date: data.purchaseDate || null,
+    purchase_value: data.purchaseValue ?? null, notes: data.notes ?? null,
+    serial_number: data.serialNumber ?? null, location: data.location ?? null,
+    model: data.model ?? null, last_pm_date: data.lastPmDate || null,
+    next_pm_date: data.nextPmDate || null, pm_required: data.pmRequired ?? true,
+  };
+}
+
+export async function createAssetWithHistory(requestId: string, data: AssetCreationData) {
+  const { data: row, error } = await supabase.rpc('create_asset_with_history', {
+    p_request_id: requestId, p_asset: assetCreationPayload(data),
+  }).single();
+  if (error) throw error;
+  const result = row as { id?: string; asset_tag?: string } | null;
+  if (!result?.id || !result?.asset_tag) throw new Error('Asset creation response was incomplete.');
+  return result;
+}
+
 export function useCreateAsset() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ data }: { data: CreateAssetRequest & { serialNumber?: string; location?: string; model?: string; purchaseValue?: number; lastPmDate?: string; nextPmDate?: string } }) => {
-      const { data: row, error } = await supabase.from('assets').insert({
-        asset_tag: data.assetTag,
-        name: data.name,
-        category: data.category,
-        status: data.status,
-        assigned_to: data.assignedToId ?? null,
-        purchase_date: data.purchaseDate || null,
-        purchase_value: (data as any).purchaseValue ?? null,
-        notes: data.notes ?? null,
-        serial_number: (data as any).serialNumber ?? null,
-        location: (data as any).location ?? null,
-        model: (data as any).model ?? null,
-        last_pm_date: (data as any).lastPmDate || null,
-        next_pm_date: (data as any).nextPmDate || null,
-        pm_required: (data as any).pmRequired ?? true,
-      }).select().single();
-      if (error) throw error;
-      return row;
-    },
+    mutationFn: ({ requestId, data }: { requestId: string; data: AssetCreationData }) => createAssetWithHistory(requestId, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['assets'] }),
   });
 }
@@ -330,28 +338,6 @@ export function useGetAssetAnomalies() {
       );
     },
   });
-}
-
-// ─── ASSET TAG AUTO-GENERATION ───────────────────────────────────────────────
-
-export async function generateNextAssetTag(): Promise<string> {
-  const year = new Date().getFullYear();
-  const prefix = `DOST02-ITA${year}`;
-
-  const { data } = await supabase
-    .from('assets')
-    .select('asset_tag')
-    .ilike('asset_tag', `${prefix}%`)
-    .order('asset_tag', { ascending: false })
-    .limit(1);
-
-  if (!data || data.length === 0) return `${prefix}000001`;
-
-  const last = data[0].asset_tag as string;
-  const numPart = last.replace(prefix, '');
-  const num = parseInt(numPart, 10);
-  const next = isNaN(num) ? 1 : num + 1;
-  return `${prefix}${String(next).padStart(6, '0')}`;
 }
 
 // ─── ASSET MAINTENANCE LOG ────────────────────────────────────────────────────

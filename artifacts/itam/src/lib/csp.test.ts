@@ -21,6 +21,12 @@ describe("report-only Content Security Policy", () => {
     expect(directive("script-src")).not.toContain("'unsafe-inline'");
   });
 
+  it("permits spreadsheet compression workers without allowing blob scripts", () => {
+    expect(directive("worker-src")).toContain("'self'");
+    expect(directive("worker-src")).toContain("blob:");
+    expect(directive("script-src")).not.toContain("blob:");
+  });
+
   it("permits the app's Google Fonts stylesheet and font files", () => {
     expect(directive("style-src")).toContain("https://fonts.googleapis.com");
     expect(directive("font-src")).toContain("https://fonts.gstatic.com");

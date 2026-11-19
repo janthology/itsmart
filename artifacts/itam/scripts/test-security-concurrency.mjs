@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { realpathSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, sep } from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import pg from 'pg';
 
 const socket = process.env.ITSMART_TEST_PG_SOCKET;
@@ -110,6 +110,52 @@ try {
   assert.equal(deliveries.rows[0].total, 1);
   assert.equal(notifications.rows[0].total, 1);
   console.log('PASS: 16 overlapping SLA jobs created exactly one delivery and notification for the same requester/assignee.');
+
+  // Minimal synthetic Auth/profile/asset schema for real concurrent RPC calls;
+  // this is not the hosted Supabase Auth or PostgREST stack.
+  await pool.query(`
+    CREATE TYPE public.user_role AS ENUM ('administrator','support_staff','general_user');
+    CREATE TYPE public.asset_status AS ENUM ('active','inactive','maintenance','retired');
+    CREATE TYPE public.asset_category_type AS ENUM ('laptop','other');
+    ALTER TABLE public.profiles ADD COLUMN role public.user_role NOT NULL DEFAULT 'administrator', ADD COLUMN is_active boolean NOT NULL DEFAULT true;
+    CREATE SCHEMA auth;
+    CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
+    CREATE FUNCTION public.get_my_role() RETURNS public.user_role LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS $$ SELECT role FROM public.profiles WHERE id=auth.uid() AND is_active $$;
+    GRANT USAGE ON SCHEMA auth TO authenticated;
+    CREATE TABLE public.assets(id uuid DEFAULT gen_random_uuid() PRIMARY KEY, asset_tag text NOT NULL UNIQUE, name text NOT NULL,
+      category public.asset_category_type NOT NULL, status public.asset_status NOT NULL DEFAULT 'active', assigned_to uuid,
+      purchase_date date, purchase_value numeric, notes text, serial_number text, location text, model text,
+      last_pm_date date, next_pm_date date, pm_required boolean NOT NULL DEFAULT true);
+    CREATE TABLE public.asset_history(id uuid DEFAULT gen_random_uuid() PRIMARY KEY, asset_id uuid NOT NULL REFERENCES public.assets(id),
+      action text NOT NULL, field_name text, new_value text, changed_by uuid REFERENCES public.profiles(id));
+    GRANT SELECT ON public.assets, public.asset_history TO authenticated;
+  `);
+  const assetMigration = readFileSync(new URL('../../../supabase/migrations/20261101000018_create_asset_atomically.sql', import.meta.url), 'utf8');
+  await pool.query(assetMigration);
+  const assetPayload = JSON.stringify({ name: 'Synthetic atomic asset', category: 'laptop', pm_required: false });
+  const createAsset = async requestId => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('request.jwt.claim.sub',$1,true)", [userId]);
+      await client.query('SET LOCAL ROLE authenticated');
+      const result = await client.query('SELECT (public.create_asset_with_history($1,$2::jsonb)).id AS id', [requestId, assetPayload]);
+      await client.query('SELECT pg_sleep(0.02)');
+      await client.query('COMMIT');
+      return result.rows[0].id;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  };
+  const uniqueRequests = await Promise.all(Array.from({ length: 16 }, () => createAsset(randomUUID())));
+  assert.equal(new Set(uniqueRequests).size, 16);
+  const sameRequestId = randomUUID();
+  const replayed = await Promise.all(Array.from({ length: 12 }, () => createAsset(sameRequestId)));
+  assert.equal(new Set(replayed).size, 1);
+  const totals = await pool.query('SELECT (SELECT count(*)::int FROM public.assets) AS assets, (SELECT count(DISTINCT asset_tag)::int FROM public.assets) AS tags, (SELECT count(*)::int FROM public.asset_history) AS history');
+  assert.deepEqual(totals.rows[0], { assets: 17, tags: 17, history: 17 });
+  console.log('PASS: 16 concurrent asset creates had distinct tags; 12 concurrent retries created one asset and one history entry.');
 } finally {
   if (pool) await pool.end();
   if (databaseCreated) await control.query(`DROP DATABASE ${dbName}`);

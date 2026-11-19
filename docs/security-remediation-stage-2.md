@@ -1,5 +1,7 @@
 # System remediation — stage 2, locally prepared
 
+**Later local update:** stage 3 replaces the vulnerable spreadsheet writer, prepares atomic asset creation and further updates dependencies. See `security-remediation-stage-3.md` for the latest audit result and remaining limitations; the dependency counts and unresolved asset-allocation statement below describe the earlier stage-2 snapshot.
+
 These changes are checked in for review, **not applied to production**. They are independent prepared changes, not approval to deploy. Live migration versions do not match repository timestamps: do not run a blanket `supabase db push`. Before each production change, re-read the relevant live definitions and policies, confirm deployment compatibility and obtain specific approval for the exact migration and rollback. No verified backup or isolated Supabase staging project exists; this document and the configuration inventory are not recoverable backups. No pilot reset is authorized by this work.
 
 ## Asset-history actor guard

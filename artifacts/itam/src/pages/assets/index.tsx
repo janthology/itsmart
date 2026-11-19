@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearch } from "wouter";
-import { useGetAssets, useCreateAsset, useAddAssetHistory, AssetCategory, AssetStatus, generateNextAssetTag } from "@/lib/supabase-queries";
+import { useGetAssets, useCreateAsset, assetCreationPayload, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -26,7 +26,6 @@ import { useToast } from "@/hooks/use-toast";
 const PAGE_SIZE = 25;
 
 const createAssetSchema = z.object({
-  assetTag: z.string().min(1, "Tag is required"),
   name: z.string().min(1, "Name is required"),
   model: z.string().optional().nullable(),
   serialNumber: z.string().optional().nullable(),
@@ -34,7 +33,7 @@ const createAssetSchema = z.object({
   category: z.nativeEnum(AssetCategory),
   status: z.nativeEnum(AssetStatus),
   purchaseDate: z.string().optional().nullable(),
-  purchaseValue: z.coerce.number().optional().nullable(),
+  purchaseValue: z.coerce.number<number>().optional().nullable(),
   lastPmDate: z.string().optional().nullable(),
   nextPmDate: z.string().optional().nullable(),
   pmRequired: z.boolean(),
@@ -56,11 +55,13 @@ export default function AssetsList() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [createSuccess, setCreateSuccess] = useState(false);
+  const [creationWarning, setCreationWarning] = useState(false);
+  const pendingCreation = useRef<{ requestId: string; payload: string } | null>(null);
 
   const form = useForm<z.infer<typeof createAssetSchema>>({
     resolver: zodResolver(createAssetSchema),
     defaultValues: {
-      assetTag: "", name: "", model: "", serialNumber: "", location: "",
+      name: "", model: "", serialNumber: "", location: "",
       category: "laptop" as AssetCategory, status: "active" as AssetStatus,
       purchaseDate: "", purchaseValue: null, lastPmDate: "", nextPmDate: "", pmRequired: true, notes: "",
     },
@@ -70,7 +71,7 @@ export default function AssetsList() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if ((e.key === 'n' || e.key === 'N') && isAdmin) { e.preventDefault(); setIsDialogOpen(true); generateNextAssetTag().then(tag => form.setValue('assetTag', tag)); }
+      if ((e.key === 'n' || e.key === 'N') && isAdmin) { e.preventDefault(); setIsDialogOpen(true); }
       if (e.key === '/') { e.preventDefault(); document.querySelector<HTMLInputElement>('input[placeholder*="Search"]')?.focus(); }
     };
     window.addEventListener('keydown', handler);
@@ -116,7 +117,6 @@ export default function AssetsList() {
 
   const { data, isLoading, error: assetsError, refetch: refetchAssets } = useGetAssets({ query: queryFilters });
   const createMutation = useCreateAsset();
-  const addHistory = useAddAssetHistory();
 
   // Fleet composition uses scope only — not narrowed by status, category, or search
   const summaryQueryFilters: { assignedTo?: string } = {};
@@ -145,29 +145,41 @@ export default function AssetsList() {
     [baseForSummary]
   );
   const onSubmit = async (values: z.infer<typeof createAssetSchema>) => {
+    const data = { ...values, nextPmDate: values.pmRequired ? values.nextPmDate : null };
+    const payload = JSON.stringify(assetCreationPayload(data));
+    if (pendingCreation.current && pendingCreation.current.payload !== payload) {
+      toast({ variant: "destructive", title: "Check the previous request", description: "Retry the same details, or check the asset list before allowing a new request." });
+      return;
+    }
+    const request = pendingCreation.current ?? { requestId: crypto.randomUUID(), payload };
+    pendingCreation.current = request;
     try {
-      const newAsset = await createMutation.mutateAsync({ data: { ...values, nextPmDate: values.pmRequired ? values.nextPmDate : null } as any });
-      // Log creation event
-      if (newAsset?.id) {
-        await addHistory.mutateAsync({
-          assetId: newAsset.id,
-          action: 'created',
-          fieldName: 'Asset',
-          oldValue: undefined,
-          newValue: `${values.assetTag} — ${values.name}`,
-        });
-      }
+      await createMutation.mutateAsync({ requestId: request.requestId, data });
+      pendingCreation.current = null;
+      setCreationWarning(false);
       setCreateSuccess(true);
-      queryClient.invalidateQueries({ queryKey: ['assets'] });
+      void queryClient.invalidateQueries({ queryKey: ['assets'] });
       setTimeout(() => {
         setIsDialogOpen(false);
         setCreateSuccess(false);
         form.reset();
       }, 1200);
-    } catch (error: any) {
-      toast({ variant: "destructive", title: "Error", description: error.message || "Failed to create asset." });
+    } catch {
+      // The response can be lost after commit. Retrying the same request ID and
+      // unchanged payload is idempotent while this page remains mounted.
+      setCreationWarning(true);
+      void queryClient.invalidateQueries({ queryKey: ['assets'] });
     }
   };
+
+  const creationWarningContent = creationWarning && (
+    <div role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+      <p className="font-semibold">Asset creation needs review</p>
+      <p>The result could not be confirmed. The asset may already exist. Retry the same details on this page, or check the asset list before starting a new request.</p>
+      <p className="mt-1">The retry key and this warning are not saved if you leave the page.</p>
+      <Button type="button" variant="outline" size="sm" className="mt-2" disabled={createMutation.isPending} onClick={() => { pendingCreation.current = null; setCreationWarning(false); }}>I checked; allow a new request</Button>
+    </div>
+  );
 
   const categories = Object.values(AssetCategory);
   const hasActiveFilters = Boolean(search || statusFilter !== "all" || categoryFilter !== "all");
@@ -211,16 +223,7 @@ export default function AssetsList() {
               </button>
             </div>
             {isAdmin && (
-                <Dialog
-                  open={isDialogOpen}
-                  onOpenChange={async (open) => {
-                    setIsDialogOpen(open);
-                    if (open) {
-                      const tag = await generateNextAssetTag();
-                      form.setValue("assetTag", tag);
-                    }
-                  }}
-                >
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                   <DialogTrigger asChild>
                     <Button className="h-9 rounded-xl shadow-sm">
                       <Plus className="w-4 h-4 mr-1.5" /> New asset
@@ -235,17 +238,13 @@ export default function AssetsList() {
                     </div>
                     <Form {...form}>
                       <form onSubmit={form.handleSubmit(onSubmit)} className="flex min-h-0 flex-1 flex-col">
-                        <div className="flex-1 overflow-y-auto px-6 py-4">
+                        <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+                          {creationWarningContent}
                           <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                            <FormField control={form.control} name="assetTag" render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>Asset Tag</FormLabel>
-                                <FormControl>
-                                  <Input {...field} readOnly className="rounded-xl bg-muted/50 text-muted-foreground font-mono cursor-not-allowed" />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )} />
+                            <div className="space-y-2">
+                              <p className="text-sm font-medium">Asset Tag</p>
+                              <p className="rounded-xl border border-input bg-muted/50 px-3 py-2 text-sm text-muted-foreground">Assigned when saved</p>
+                            </div>
                             <FormField control={form.control} name="name" render={({ field }) => (
                               <FormItem><FormLabel>Asset Name</FormLabel><FormControl><Input placeholder="e.g. Dell Laptop" {...field} className="rounded-xl" /></FormControl><FormMessage /></FormItem>
                             )} />
@@ -317,6 +316,7 @@ export default function AssetsList() {
                 </Dialog>
               )}
         </PageHeader>
+        {!isDialogOpen && creationWarningContent}
 
         {/* Split layout: fleet sidebar + inventory */}
         <div className="grid gap-5 lg:grid-cols-[minmax(240px,280px)_1fr] lg:items-start">
@@ -367,11 +367,7 @@ export default function AssetsList() {
                   isAdmin && !hasActiveFilters ? (
                     <Button
                       className="gap-2 rounded-xl"
-                      onClick={async () => {
-                        setIsDialogOpen(true);
-                        const tag = await generateNextAssetTag();
-                        form.setValue("assetTag", tag);
-                      }}
+                      onClick={() => setIsDialogOpen(true)}
                     >
                       <PackagePlus className="h-4 w-4" /> Add first asset
                     </Button>

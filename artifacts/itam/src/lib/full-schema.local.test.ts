@@ -185,6 +185,37 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     await db.exec('ALTER TABLE notifications DROP CONSTRAINT local_reject_risk; SELECT public.notify_sla_at_risk();');
     expect((await db.query('SELECT ticket_id FROM sla_notification_deliveries WHERE ticket_id=$1', [failId])).rows).toHaveLength(1);
   });
+  it('creates an asset and its actor-derived history atomically with retry deduplication', async () => {
+    await asUser(admin);
+    await db.query("INSERT INTO assets(asset_tag,name,category,pm_required) VALUES ('DOST02-ITA' || to_char(now() AT TIME ZONE 'Asia/Manila','YYYY') || '000999','Existing','laptop',false)");
+    const requestId = '40000000-0000-4000-8000-000000000001';
+    const payload = JSON.stringify({ name: 'LOCAL-ATOMIC', category: 'laptop', status: 'active', pm_required: false });
+    const sql = 'SELECT (public.create_asset_with_history($1,$2::jsonb)).id AS id';
+    const first = await db.query<{ id: string }>(sql, [requestId, payload]);
+    expect(await db.query(sql, [requestId, payload])).toEqual(first);
+    const asset = await db.query<{ asset_tag: string }>('SELECT asset_tag FROM assets WHERE id=$1', [first.rows[0].id]);
+    expect(asset.rows[0].asset_tag).toMatch(/^DOST02-ITA\d{4}001000$/);
+    expect((await db.query("SELECT changed_by FROM asset_history WHERE asset_id=$1 AND action='created'", [first.rows[0].id])).rows).toEqual([{ changed_by: admin }]);
+    await expect(db.query(sql, [requestId, JSON.stringify({ name: 'Changed', category: 'laptop', pm_required: false })])).rejects.toThrow(/different asset data/);
+    await expect(db.query('SELECT * FROM asset_creation_requests')).rejects.toThrow(/permission denied/);
+    await asUser(support);
+    const supportAsset = await db.query<{ id: string }>(sql, ['40000000-0000-4000-8000-000000000002', payload]);
+    expect((await db.query("SELECT changed_by FROM asset_history WHERE asset_id=$1 AND action='created'", [supportAsset.rows[0].id])).rows).toEqual([{ changed_by: support }]);
+    await expect(db.query(sql, ['40000000-0000-4000-8000-000000000003', JSON.stringify({ name: 'Denied', category: 'laptop', status: 'retired', pm_required: false })])).rejects.toThrow(/Only administrators/);
+    await asUser(general);
+    await expect(db.query(sql, ['40000000-0000-4000-8000-000000000004', payload])).rejects.toThrow(/Only active administrators/);
+  });
+  it('rolls back asset creation, counter and request when creation history fails', async () => {
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); ALTER TABLE asset_history ADD CONSTRAINT local_reject_created CHECK (action <> 'created') NOT VALID;");
+    const before = await db.query('SELECT * FROM asset_tag_counters');
+    await asUser(admin);
+    const requestId = '40000000-0000-4000-8000-000000000005';
+    await expect(db.query('SELECT public.create_asset_with_history($1,$2::jsonb)', [requestId, JSON.stringify({ name: 'LOCAL-FAIL', category: 'laptop', pm_required: false })])).rejects.toThrow(/local_reject_created/);
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); ALTER TABLE asset_history DROP CONSTRAINT local_reject_created;");
+    expect(await db.query('SELECT * FROM asset_tag_counters')).toEqual(before);
+    expect((await db.query('SELECT id FROM assets WHERE name=$1', ['LOCAL-FAIL'])).rows).toHaveLength(0);
+    expect((await db.query('SELECT request_id FROM asset_creation_requests WHERE request_id=$1', [requestId])).rows).toHaveLength(0);
+  });
   it('allocates above existing manual numbers and retains its high-water mark after deletion', async () => {
     await asUser(admin);
     const manual = await db.query("INSERT INTO tickets(title,created_by,ticket_number) VALUES ('LOCAL-ALLOC-MANUAL',$1,'DOST02-ITS' || to_char(now(),'YYYY') || '99999') RETURNING id", [admin]);
@@ -209,6 +240,17 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     await asUser(general);
     const row = await db.query("INSERT INTO tickets(title,created_by,status,resolved_at) VALUES ('Rollback characterization',$1,'resolved',now()) RETURNING status", [general]);
     expect(row.rows).toEqual([{ status: 'resolved' }]); // Rollback reopens this vulnerability.
+  });
+  it('asset creation rollback removes the RPC without discarding allocation or retry records', async () => {
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
+    const before = await db.query('SELECT count(*)::int AS total FROM asset_creation_requests');
+    await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000018_create_asset_atomically.sql', import.meta.url), 'utf8'));
+    expect((await db.query("SELECT to_regprocedure('public.create_asset_with_history(uuid,jsonb)') AS fn")).rows).toEqual([{ fn: null }]);
+    expect(await db.query('SELECT count(*)::int AS total FROM asset_creation_requests')).toEqual(before);
+    await db.exec(script('20261101000018_create_asset_atomically.sql'));
+    await asUser(admin);
+    const replay = await db.query("SELECT (public.create_asset_with_history($1,$2::jsonb)).id AS id", ['40000000-0000-4000-8000-000000000001', JSON.stringify({ name: 'LOCAL-ATOMIC', category: 'laptop', status: 'active', pm_required: false })]);
+    expect(replay.rows).toHaveLength(1);
   });
   it('SLA rollback restores prior functions without deleting delivery history', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");

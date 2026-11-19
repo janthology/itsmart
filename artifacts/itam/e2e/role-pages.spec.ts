@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import * as XLSX from 'xlsx';
+import readExcelFile from 'read-excel-file/node';
 
 type Role = 'administrator' | 'support_staff' | 'general_user';
 const profiles = [
@@ -187,6 +187,37 @@ for (const failure of ['403', 'no-row'] as const) {
 }
 
 
+test('asset creation retries the same atomic request and blocks changed details until review', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  const requests: { p_request_id: string; p_asset: Record<string, unknown> }[] = [];
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+  await page.route('**/rest/v1/rpc/create_asset_with_history', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    requests.push(route.request().postDataJSON());
+    if (requests.length === 1) return route.fulfill({ status: 503, headers, contentType: 'application/json', body: JSON.stringify({ message: 'response lost' }) });
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify({ id: assetId, asset_tag: 'DOST02-ITA2026000001' }) });
+  });
+  await page.goto('/assets');
+  await page.getByRole('button', { name: /New asset/i }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByText('Assigned when saved')).toBeVisible();
+  await dialog.getByPlaceholder('e.g. Dell Laptop').fill('Synthetic created asset');
+  await dialog.getByLabel('Preventive maintenance required').uncheck();
+  await dialog.getByRole('button', { name: 'Save asset' }).click();
+  await expect(dialog.getByRole('alert').filter({ hasText: 'Asset creation needs review' })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].p_asset).not.toHaveProperty('asset_tag');
+  await dialog.getByPlaceholder('e.g. Dell Laptop').fill('Different asset');
+  await dialog.getByRole('button', { name: 'Save asset' }).click();
+  await expect(page.getByText('Check the previous request', { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(1);
+  await dialog.getByPlaceholder('e.g. Dell Laptop').fill('Synthetic created asset');
+  await dialog.getByRole('button', { name: 'Save asset' }).click();
+  await expect(dialog.getByRole('button', { name: 'Asset saved' })).toBeVisible();
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+});
+
 test('depreciation preview and downloads handle zero-cost and future assets', async ({ page }) => {
   await syntheticSession(page, 'administrator');
   await page.route('**/rest/v1/assets*', async route => {
@@ -206,9 +237,12 @@ test('depreciation preview and downloads handle zero-cost and future assets', as
   await expect(rows.filter({ hasText: 'FUTURE' })).toContainText('0%');
   await expect(rows.filter({ hasText: 'ZERO' })).toContainText('N/A');
   const [xlsxDownload] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: /Excel/ }).click()]);
-  const workbook = XLSX.read(await readFile(await xlsxDownload.path()));
-  const data = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets.Depreciation, { defval: '' });
-  expect(data.map(r => [r['Asset Tag'], r['Current Value (₱)'], r['% Depreciated']])).toEqual([['FUTURE', 5000, 0], ['ZERO', 0, '']]);
+  const workbook = await readExcelFile(await readFile(await xlsxDownload.path()));
+  const [header, ...data] = workbook.find(sheet => sheet.sheet === 'Depreciation')!.data;
+  const tagColumn = header.indexOf('Asset Tag');
+  const valueColumn = header.indexOf('Current Value (₱)');
+  const percentColumn = header.indexOf('% Depreciated');
+  expect(data.map(r => [r[tagColumn], r[valueColumn], r[percentColumn] ?? ''])).toEqual([['FUTURE', 5000, 0], ['ZERO', 0, '']]);
   const [pdfDownload] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: 'Download PDF' }).click()]);
   const pdf = await readFile(await pdfDownload.path());
   expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');

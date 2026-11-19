@@ -1,22 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  jsonToSheet: vi.fn((rows: unknown) => rows),
-  aoaToSheet: vi.fn((rows: unknown) => rows),
-  appendSheet: vi.fn(),
+  writeSheets: vi.fn(),
   writeFile: vi.fn(),
   autoTable: vi.fn(),
 }));
 
-vi.mock("xlsx", () => ({
-  utils: {
-    json_to_sheet: mocks.jsonToSheet,
-    aoa_to_sheet: mocks.aoaToSheet,
-    book_new: () => ({}),
-    book_append_sheet: mocks.appendSheet,
+vi.mock("write-excel-file/browser", () => ({
+  default: (sheets: unknown) => {
+    mocks.writeSheets(sheets);
+    return { toFile: mocks.writeFile };
   },
-  writeFile: mocks.writeFile,
 }));
+
+function reportRows(): Record<string, unknown>[] {
+  const sheets = mocks.writeSheets.mock.calls[0][0] as { sheet: string; data: unknown[][] }[];
+  const [headers, ...rows] = sheets[0].data;
+  return rows.map(row => Object.fromEntries(headers.map((header, index) => [String(header), row[index] ?? ''])));
+}
 
 vi.mock("jspdf", () => ({
   default: class {
@@ -46,11 +47,11 @@ afterEach(() => vi.useRealTimers());
 describe("ticket performance exports", () => {
   it("writes hold-aware hours and the same unrounded outcomes to Excel", async () => {
     await exportTicketPerformanceXlsx(tickets);
-    const rows = mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[];
+    const rows = reportRows();
     expect(rows.map((r) => [r["Resolution Time (h)"], r["SLA Status"]])).toEqual([
       [6, "Met"], [8, "Breached"], ["", "Closed without resolution"], ["", "Pending"],
     ]);
-    expect(mocks.appendSheet.mock.calls.map((args) => args[2])).toEqual(["Performance", "Notes"]);
+    expect((mocks.writeSheets.mock.calls[0][0] as { sheet: string }[]).map(sheet => sheet.sheet)).toEqual(["Performance", "Notes"]);
     expect(mocks.writeFile).toHaveBeenCalledOnce();
   });
 
@@ -68,14 +69,14 @@ describe("asset report audit", () => {
   it("does not claim time since purchase is time spent unassigned", async () => {
     const { exportUnassignedAssetsXlsx } = await import('./reports');
     await exportUnassignedAssetsXlsx([{ assetTag: 'A-1', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01' }]);
-    const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
+    const row = reportRows()[0];
     expect(row).not.toHaveProperty('Days Unassigned');
   });
 
   it("does not export NaN depreciation for a zero-value asset", async () => {
     const { exportDepreciationXlsx } = await import('./reports');
     await exportDepreciationXlsx([{ assetTag: 'A-2', name: 'Example', category: 'laptop', status: 'active', purchaseDate: '2020-01-01', purchaseValue: 0 }]);
-    const row = (mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[])[0];
+    const row = reportRows()[0];
     expect(row['% Depreciated']).toBe('');
     expect(row['Current Value (₱)']).toBe(0);
   });
@@ -89,7 +90,7 @@ describe("asset report audit", () => {
       { assetTag: 'A-2', name: 'Zero', category: 'laptop', status: 'active', purchaseDate: '2020-01-01', purchaseValue: 0 },
     ];
     await exportDepreciationXlsx(assets);
-    const rows = mocks.jsonToSheet.mock.calls[0][0] as Record<string, unknown>[];
+    const rows = reportRows();
     expect(rows.map(r => [r['Age (Years)'], r['Accumulated Depreciation (₱)'], r['Current Value (₱)'], r['% Depreciated']])).toEqual([[0, 0, 5000, 0], [6, 0, 0, '']]);
     await exportDepreciationPdf(assets);
     const body = (mocks.autoTable.mock.calls[0][1] as { body: unknown[][] }).body;

@@ -37,7 +37,7 @@ type UpdateAssetForm = {
   notes?: string | null;
 };
 
-const updateAssetSchema: z.ZodType<UpdateAssetForm> = z.object({
+const updateAssetSchema = z.object({
   name: z.string().min(1, "Name is required"),
   model: z.string().optional().nullable(),
   serialNumber: z.string().optional().nullable(),
@@ -45,7 +45,7 @@ const updateAssetSchema: z.ZodType<UpdateAssetForm> = z.object({
   category: z.enum(['laptop','desktop','monitor','phone','tablet','printer','server','networking','peripheral','other'] as const),
   status: z.enum(['active','inactive','maintenance','retired'] as const),
   purchaseDate: z.string().optional().nullable(),
-  purchaseValue: z.coerce.number().optional().nullable(),
+  purchaseValue: z.coerce.number<number>().optional().nullable(),
   notes: z.string().optional().nullable(),
 });
 
