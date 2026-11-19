@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearch } from "wouter";
 import { useGetAssets, useCreateAsset, assetCreationPayload, AssetCategory, AssetStatus } from "@/lib/supabase-queries";
+import { clearAssetAttempt, fingerprintAssetPayload, readAssetAttempt, saveAssetAttempt } from "@/lib/asset-creation-retry";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { PageHeader } from "@/components/layout/page-header";
@@ -56,7 +57,20 @@ export default function AssetsList() {
   const [page, setPage] = useState(1);
   const [createSuccess, setCreateSuccess] = useState(false);
   const [creationWarning, setCreationWarning] = useState(false);
-  const pendingCreation = useRef<{ requestId: string; payload: string } | null>(null);
+  const [retryStorageError, setRetryStorageError] = useState(false);
+  const submittingCreation = useRef(false);
+
+  useEffect(() => {
+    if (!user?.id) { setCreationWarning(false); setRetryStorageError(false); return; }
+    try {
+      setCreationWarning(readAssetAttempt(window.sessionStorage, user.id) !== null);
+      setRetryStorageError(false);
+    } catch {
+      // Fail closed: an unreadable record may represent an ambiguous request.
+      setCreationWarning(true);
+      setRetryStorageError(true);
+    }
+  }, [user?.id]);
 
   const form = useForm<z.infer<typeof createAssetSchema>>({
     resolver: zodResolver(createAssetSchema),
@@ -145,39 +159,76 @@ export default function AssetsList() {
     [baseForSummary]
   );
   const onSubmit = async (values: z.infer<typeof createAssetSchema>) => {
+    if (submittingCreation.current || !user?.id) return;
+    submittingCreation.current = true;
+    const actor = user.id;
     const data = { ...values, nextPmDate: values.pmRequired ? values.nextPmDate : null };
-    const payload = JSON.stringify(assetCreationPayload(data));
-    if (pendingCreation.current && pendingCreation.current.payload !== payload) {
-      toast({ variant: "destructive", title: "Check the previous request", description: "Retry the same details, or check the asset list before allowing a new request." });
-      return;
-    }
-    const request = pendingCreation.current ?? { requestId: crypto.randomUUID(), payload };
-    pendingCreation.current = request;
     try {
-      await createMutation.mutateAsync({ requestId: request.requestId, data });
-      pendingCreation.current = null;
-      setCreationWarning(false);
-      setCreateSuccess(true);
-      void queryClient.invalidateQueries({ queryKey: ['assets'] });
-      setTimeout(() => {
-        setIsDialogOpen(false);
-        setCreateSuccess(false);
-        form.reset();
-      }, 1200);
-    } catch {
-      // The response can be lost after commit. Retrying the same request ID and
-      // unchanged payload is idempotent while this page remains mounted.
-      setCreationWarning(true);
-      void queryClient.invalidateQueries({ queryKey: ['assets'] });
+      let requestId: string;
+      try {
+        const digest = await fingerprintAssetPayload(JSON.stringify(assetCreationPayload(data)));
+        const prior = readAssetAttempt(window.sessionStorage, actor);
+        if (prior && prior.fingerprint !== digest) {
+          toast({ variant: "destructive", title: "Check the previous request", description: "Retry the same details, or check the asset list before allowing a new request." });
+          setCreationWarning(true);
+          return;
+        }
+        const attempt = prior ?? { version: 1 as const, requestId: crypto.randomUUID(), fingerprint: digest };
+        // Persist before sending. If this fails, do not issue the mutation.
+        saveAssetAttempt(window.sessionStorage, actor, attempt);
+        requestId = attempt.requestId;
+        setRetryStorageError(false);
+      } catch {
+        setCreationWarning(true);
+        setRetryStorageError(true);
+        toast({ variant: "destructive", title: "Cannot safely save retry information", description: "No asset request was sent. Check browser storage and review any previous request." });
+        return;
+      }
+      try {
+        await createMutation.mutateAsync({ requestId, data });
+        try {
+          clearAssetAttempt(window.sessionStorage, actor);
+          setCreationWarning(false);
+          setRetryStorageError(false);
+        } catch {
+          setCreationWarning(true);
+          setRetryStorageError(true);
+        }
+        setCreateSuccess(true);
+        void queryClient.invalidateQueries({ queryKey: ['assets'] });
+        setTimeout(() => {
+          setIsDialogOpen(false);
+          setCreateSuccess(false);
+          form.reset();
+        }, 1200);
+      } catch {
+        // The response may be lost after commit. Keep the ID and fingerprint
+        // so an identical retry in this tab survives navigation or reload.
+        setCreationWarning(true);
+        void queryClient.invalidateQueries({ queryKey: ['assets'] });
+      }
+    } finally {
+      submittingCreation.current = false;
     }
   };
 
   const creationWarningContent = creationWarning && (
     <div role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
       <p className="font-semibold">Asset creation needs review</p>
-      <p>The result could not be confirmed. The asset may already exist. Retry the same details on this page, or check the asset list before starting a new request.</p>
-      <p className="mt-1">The retry key and this warning are not saved if you leave the page.</p>
-      <Button type="button" variant="outline" size="sm" className="mt-2" disabled={createMutation.isPending} onClick={() => { pendingCreation.current = null; setCreationWarning(false); }}>I checked; allow a new request</Button>
+      <p>A previous request may have succeeded. Retry the exact same details, or check the asset list before starting a new request.</p>
+      <p className="mt-1">The retry key is kept only in this browser tab; closing the tab, clearing browser storage, or using another tab or device can lose it. Asset details are not saved here.</p>
+      {retryStorageError && <p className="mt-1">Retry information is unavailable. No new request will be sent until browser storage is available and the previous result is reviewed.</p>}
+      <Button type="button" variant="outline" size="sm" className="mt-2" disabled={createMutation.isPending} onClick={() => {
+        if (!user?.id) return;
+        try {
+          clearAssetAttempt(window.sessionStorage, user.id);
+          setCreationWarning(false);
+          setRetryStorageError(false);
+        } catch {
+          setRetryStorageError(true);
+          toast({ variant: "destructive", title: "Could not clear retry information", description: "Check browser storage before starting a new request." });
+        }
+      }}>I checked; allow a new request</Button>
     </div>
   );
 

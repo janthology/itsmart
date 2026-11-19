@@ -207,6 +207,13 @@ test('asset creation retries the same atomic request and blocks changed details 
   await expect(dialog.getByRole('alert').filter({ hasText: 'Asset creation needs review' })).toBeVisible();
   expect(requests).toHaveLength(1);
   expect(requests[0].p_asset).not.toHaveProperty('asset_tag');
+  const stored = await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith('itsmart:asset-creation:v1:')));
+  expect(stored).toHaveLength(1);
+  expect(stored[0][1]).not.toContain('Synthetic created asset');
+  await page.reload();
+  await expect(page.getByRole('alert').filter({ hasText: 'Asset creation needs review' })).toBeVisible();
+  await page.getByRole('button', { name: /New asset/i }).click();
+  await dialog.getByLabel('Preventive maintenance required').uncheck();
   await dialog.getByPlaceholder('e.g. Dell Laptop').fill('Different asset');
   await dialog.getByRole('button', { name: 'Save asset' }).click();
   await expect(page.getByText('Check the previous request', { exact: true })).toBeVisible();
@@ -216,6 +223,31 @@ test('asset creation retries the same atomic request and blocks changed details 
   await expect(dialog.getByRole('button', { name: 'Asset saved' })).toBeVisible();
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
+  expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('itsmart:asset-creation:v1:')))).toHaveLength(0);
+});
+
+test('asset creation fails closed when tab retry storage is unavailable', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === window.sessionStorage && key.startsWith('itsmart:asset-creation:v1:')) throw new Error('Synthetic blocked storage');
+      return original.call(this, key, value);
+    };
+  });
+  let attempts = 0;
+  await page.route('**/rest/v1/rpc/create_asset_with_history', async route => {
+    if (route.request().method() !== 'OPTIONS') attempts++;
+    await route.fulfill({ status: 500, body: 'Unexpected request' });
+  });
+  await page.goto('/assets');
+  await page.getByRole('button', { name: /New asset/i }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByPlaceholder('e.g. Dell Laptop').fill('Synthetic asset');
+  await dialog.getByLabel('Preventive maintenance required').uncheck();
+  await dialog.getByRole('button', { name: 'Save asset' }).click();
+  await expect(dialog.getByRole('alert').filter({ hasText: 'Retry information is unavailable' })).toBeVisible();
+  expect(attempts).toBe(0);
 });
 
 test('depreciation preview and downloads handle zero-cost and future assets', async ({ page }) => {
