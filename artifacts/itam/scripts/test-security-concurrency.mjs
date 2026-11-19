@@ -184,6 +184,48 @@ try {
   await assert.rejects(pool.query("UPDATE tickets SET title='must roll back' WHERE id=$1", [ticketId]), /test_reject_ticket/);
   assert.deepEqual((await pool.query('SELECT title FROM tickets WHERE id=$1', [ticketId])).rows, original.rows);
   console.log('PASS: 12 concurrent ticket changes produced 12 attributed audit entries; audit failure rolled back the ticket change.');
+
+  await pool.query(`
+    ALTER TABLE entity_change_audit DROP CONSTRAINT test_reject_ticket;
+    CREATE TYPE public.ticket_status AS ENUM ('open','assigned','in_progress','resolved','closed','on_hold');
+    CREATE TYPE public.ticket_priority AS ENUM ('low','medium','high','critical');
+    ALTER TABLE public.tickets ALTER COLUMN status DROP DEFAULT, ALTER COLUMN status TYPE public.ticket_status USING status::public.ticket_status,
+      ALTER COLUMN priority DROP DEFAULT, ALTER COLUMN priority TYPE public.ticket_priority USING priority::public.ticket_priority,
+      ADD COLUMN updated_at timestamptz NOT NULL DEFAULT now(), ADD COLUMN on_hold_at timestamptz,
+      ADD COLUMN resolved_at timestamptz, ADD COLUMN closed_at timestamptz;
+    ALTER TABLE public.tickets ALTER COLUMN status SET DEFAULT 'open', ALTER COLUMN priority SET DEFAULT 'high';
+    ALTER TABLE public.ticket_comments ADD COLUMN created_by uuid, ADD COLUMN is_system boolean NOT NULL DEFAULT false;
+    ALTER TABLE public.profiles ADD COLUMN full_name text DEFAULT 'Synthetic administrator';
+    CREATE FUNCTION public.is_active_user() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=public AS
+      $$ SELECT coalesce((SELECT is_active FROM public.profiles WHERE id=auth.uid()),false) $$;
+    CREATE FUNCTION public.synthetic_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$BEGIN NEW.updated_at := CURRENT_TIMESTAMP; RETURN NEW; END$$;
+    CREATE TRIGGER synthetic_updated_at BEFORE UPDATE ON public.tickets FOR EACH ROW EXECUTE FUNCTION public.synthetic_updated_at();
+    GRANT SELECT ON public.profiles TO authenticated;
+    GRANT INSERT ON public.ticket_comments TO authenticated;
+  `);
+  const workflowMigration = readFileSync(new URL('../../../supabase/migrations/20261101000020_ticket_change_with_activity.sql', import.meta.url), 'utf8');
+  await pool.query(workflowMigration);
+  const version = await pool.query('SELECT updated_at::text AS updated_at FROM public.tickets WHERE id=$1', [ticketId]);
+  const concurrentChanges = await Promise.allSettled(Array.from({ length: 2 }, async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('request.jwt.claim.sub',$1,true)", [userId]);
+      await client.query('SET LOCAL ROLE authenticated');
+      const changed = await client.query("SELECT public.update_ticket_with_activity($1,$2,'{\"status\":\"in_progress\"}'::jsonb,NULL) AS id", [ticketId, version.rows[0].updated_at]);
+      await client.query('SELECT pg_sleep(0.05)');
+      await client.query('COMMIT');
+      return changed.rows[0].id;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+  }));
+  assert.equal(concurrentChanges.filter(result => result.status === 'fulfilled').length, 1);
+  const rejectedChange = concurrentChanges.find(result => result.status === 'rejected');
+  assert.match(String(rejectedChange?.reason), /refresh and try again/);
+  assert.equal((await pool.query('SELECT count(*)::int AS n FROM ticket_comments WHERE ticket_id=$1', [ticketId])).rows[0].n, 1);
+  console.log('PASS: concurrent ticket workflow requests with the same version produced one change/comment and one stale-version rejection.');
 } finally {
   if (pool) await pool.end();
   if (databaseCreated) await control.query(`DROP DATABASE ${dbName}`);

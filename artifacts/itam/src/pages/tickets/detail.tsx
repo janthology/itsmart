@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { TICKET_STATUS_LABEL as STATUS_LABEL, TICKET_PRIORITY_LABEL as PRIORITY_LABEL } from "@/lib/labels";
 import { useRoute, Link } from "wouter";
-import { useGetTicket, useUpdateTicket, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketType, TICKET_TYPE_LABEL, getResolvedTicketAutoCloseAt, RESOLVED_TICKET_AUTO_CLOSE_DAYS } from "@/lib/supabase-queries";
+import { useGetTicket, useUpdateTicket, useChangeTicketWithActivity, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketPriority, TicketType, TICKET_TYPE_LABEL, getResolvedTicketAutoCloseAt, RESOLVED_TICKET_AUTO_CLOSE_DAYS } from "@/lib/supabase-queries";
 import { useAuth } from "@/lib/auth-context";
 import { AppLayout } from "@/components/layout/app-layout";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -13,7 +13,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Loader2, ArrowLeft, Send, MessageSquare, Clock, ShieldAlert, MonitorSmartphone, UserCheck, AlertTriangle, Star, Copy, Check, Printer, TicketIcon, History } from "lucide-react";
 import { format } from "date-fns";
-import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { SLABadge } from "@/components/ui/sla-badge";
 import { cn } from "@/lib/utils";
@@ -31,10 +30,6 @@ type Role = 'administrator' | 'support_staff' | 'general_user';
 
 // Statuses that require a remarks dialog before applying
 const REQUIRES_REMARKS = new Set(['on_hold', 'resolved', 'closed']);
-
-const PRIORITY_RANK: Record<string, number> = {
-  critical: 1, high: 2, medium: 3, low: 4,
-};
 
 function getAllowedTransitions(current: string, role: Role): string[] {
   if (role === 'administrator') {
@@ -72,10 +67,11 @@ export default function TicketDetail() {
   const isSupport = user?.role === 'support_staff';
   const canManage = isAdmin || isSupport;
   const { toast } = useToast();
-  const queryClient = useQueryClient();
 
   const { data: ticket, isLoading, isError, refetch } = useGetTicket(id);
   const updateMutation = useUpdateTicket();
+  const workflowMutation = useChangeTicketWithActivity();
+  const ticketBusy = updateMutation.isPending || workflowMutation.isPending;
   const commentMutation = useAddTicketComment();
   const { data: supportStaff } = useGetSupportStaff();
   const { data: allUsers } = useGetUsers();
@@ -123,65 +119,31 @@ export default function TicketDetail() {
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [remarksText, setRemarksText] = useState("");
 
-  // Priority confirmation state
+  // Keep the intended action/remarks on this page when a response is lost:
+  // the transaction may have committed, so do not retry it automatically.
   const [pendingPriority, setPendingPriority] = useState<string | null>(null);
-  // Kept in memory until dismissed; activity POST outcomes can be ambiguous
-  // on a lost response, so never retry automatically and risk duplication.
-  const [activityWarnings, setActivityWarnings] = useState<{ action: string; remark: string; outcome: "activity" | "update" }[]>([]);
+  const [activityWarnings, setActivityWarnings] = useState<{ action: string; remark: string }[]>([]);
   useEffect(() => setActivityWarnings([]), [id]);
-  const saveActivity = async (action: string, remark: string) => {
-    try {
-      await commentMutation.mutateAsync({ id, data: { commentText: remark } });
-      return true;
-    } catch {
-      setActivityWarnings(previous => [...previous, { action, remark, outcome: "activity" }]);
-      void queryClient.invalidateQueries({ queryKey: ['ticket', id] });
-      toast({ variant: "destructive", title: `${action} updated; activity unconfirmed`, description: "Check the warning on this page before leaving." });
-      return false;
-    }
-  };
 
-  // Called when user picks a new status from the dropdown
   const handleStatusSelect = (newStatus: string) => {
     if (REQUIRES_REMARKS.has(newStatus)) {
       setPendingStatus(newStatus);
       setRemarksText("");
     } else {
-      applyStatusChange(newStatus, null);
+      void applyStatusChange(newStatus, null);
     }
   };
 
-  // Actually commits the status change + logs comment
   const applyStatusChange = async (newStatus: string, remarks: string | null) => {
+    const changes: { status: TicketStatus; assigned_to?: null } = { status: newStatus as TicketStatus };
+    if (newStatus === 'open') changes.assigned_to = null;
     try {
-      let remark = newStatus === 'open' && ticket?.assignedTo
-        ? `🔄 Status changed to "${STATUS_LABEL[newStatus]}" by ${user?.fullName ?? 'Unknown'}. Ticket unassigned.`
-        : `🔄 Status changed to "${STATUS_LABEL[newStatus] ?? newStatus}" by ${user?.fullName ?? 'Unknown'}.`;
-      if (newStatus === 'closed') {
-        // Record the closure path: resolved_at is retained when a resolved
-        // ticket is closed, so its presence means the ticket was resolved
-        // first; otherwise it was closed directly. The assignee is kept.
-        remark += (ticket as any)?.resolvedAt
-          ? `\n🏁 Closure path: Resolved before closing. Assignee retained.`
-          : `\n🏁 Closure path: Closed directly (no resolved stage). Assignee retained.`;
-      }
-      if (remarks?.trim()) remark += `\n\n📝 Remarks: ${remarks.trim()}`;
-
-      const updates: any = { status: newStatus as TicketStatus };
-      if (newStatus === 'open') updates.assignedToId = null;
-      try {
-        await updateMutation.mutateAsync({ id, data: updates });
-      } catch {
-        // A lost PATCH response may still mean the server committed. Preserve
-        // required remarks but never create a comment for an uncertain update.
-        setActivityWarnings(previous => [...previous, { action: "Status", remark, outcome: "update" }]);
-        throw new Error('Ticket update not confirmed');
-      }
-      if (await saveActivity("Status", remark)) {
-        toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
-      }
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error", description: "Could not confirm the status update. Check the refreshed ticket before retrying." });
+      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
+      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes, remarks });
+      toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
+    } catch {
+      setActivityWarnings(previous => [...previous, { action: "Status", remark: remarks?.trim() || `Requested status: ${STATUS_LABEL[newStatus] ?? newStatus}` }]);
+      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
     } finally {
       setPendingStatus(null);
       setRemarksText("");
@@ -189,45 +151,31 @@ export default function TicketDetail() {
   };
 
   const handleAssign = async (assigneeId: string | null) => {
+    const changes: { assigned_to: string | null; status?: TicketStatus } = { assigned_to: assigneeId };
+    if (assigneeId && ticket?.status === 'open') changes.status = 'in_progress' as TicketStatus;
+    if (!assigneeId && ticket?.status === 'in_progress') changes.status = 'open' as TicketStatus;
+    const assigneeName = assigneeId ? assignableStaff.find(s => s.id === assigneeId)?.fullName ?? 'selected user' : 'Unassigned';
     try {
-      const updates: any = { assignedToId: assigneeId };
-      if (assigneeId && ticket?.status === 'open') updates.status = 'in_progress' as TicketStatus;
-      if (!assigneeId && ticket?.status === 'in_progress') updates.status = 'open' as TicketStatus;
-      await updateMutation.mutateAsync({ id, data: updates });
-
-      const assigneeName = assigneeId
-        ? (assignableStaff.find(s => s.id === assigneeId)?.fullName ?? (user?.id === assigneeId ? user?.fullName : 'Unknown'))
-        : null;
-      const statusNote =
-        assigneeId && ticket?.status === "open"
-          ? ' Status set to "in progress".'
-          : !assigneeId && ticket?.status === "in_progress"
-            ? ' Status reverted to "open".'
-            : "";
-      const remark = assigneeId
-        ? `👤 Ticket assigned to ${assigneeName} by ${user?.fullName ?? 'Unknown'}.${statusNote}`
-        : `🔓 Ticket unassigned by ${user?.fullName ?? 'Unknown'}.${statusNote}`;
-      if (await saveActivity("Assignment", remark)) {
-        toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
-      }
-    } catch (e) {
-      toast({ variant: "destructive", title: "Error", description: "Could not confirm the assignment update. Check the refreshed ticket before retrying." });
+      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
+      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes });
+      toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
+    } catch {
+      setActivityWarnings(previous => [...previous, { action: "Assignment", remark: `Requested assignee: ${assigneeName}` }]);
+      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
     }
   };
 
   const applyPriorityChange = async () => {
     if (!pendingPriority) return;
-    const oldPriority = ticket?.priority ?? '';
     const newPriority = pendingPriority;
-    setPendingPriority(null); // close immediately
+    setPendingPriority(null);
     try {
-      await updateMutation.mutateAsync({ id, data: { priority: newPriority as any } });
-      const remark = `${PRIORITY_RANK[newPriority] < PRIORITY_RANK[oldPriority] ? '⬆️' : '⬇️'} Priority changed from "${PRIORITY_LABEL[oldPriority]}" to "${PRIORITY_LABEL[newPriority]}" by ${user?.fullName ?? 'Unknown'}.`;
-      if (await saveActivity("Priority", remark)) {
-        toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
-      }
+      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
+      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes: { priority: newPriority as TicketPriority } });
+      toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
     } catch {
-      toast({ variant: "destructive", title: "Error", description: "Could not confirm the priority update. Check the refreshed ticket before retrying." });
+      setActivityWarnings(previous => [...previous, { action: "Priority", remark: `Requested priority: ${PRIORITY_LABEL[newPriority] ?? newPriority}` }]);
+      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
     }
   };
 
@@ -388,17 +336,8 @@ export default function TicketDetail() {
 
         {activityWarnings.map((warning, index) => (
           <div key={index} role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
-            {warning.outcome === "activity" ? (
-              <>
-                <p className="font-semibold">{warning.action} was updated, but its activity entry could not be confirmed.</p>
-                <p className="mt-1">Check the activity log before adding the entry manually. It may already have been saved. Keep the text below before leaving this page; this warning is not saved.</p>
-              </>
-            ) : (
-              <>
-                <p className="font-semibold">The status update could not be confirmed. No activity entry was attempted.</p>
-                <p className="mt-1">Check the refreshed ticket before retrying. If it changed, check the activity log and record the remarks below as needed. Keep the text before leaving; this warning is not saved.</p>
-              </>
-            )}
+            <p className="font-semibold">{warning.action} update and activity could not be confirmed.</p>
+            <p className="mt-1">They may both have been saved, or neither may have been saved. Check the refreshed ticket and activity before retrying. Keep the text below before leaving; this warning is not saved.</p>
             <p className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2">{warning.remark}</p>
             <Button variant="outline" size="sm" className="mt-2" onClick={() => setActivityWarnings(previous => previous.filter((_, i) => i !== index))}>Dismiss warning</Button>
           </div>
@@ -417,10 +356,10 @@ export default function TicketDetail() {
               <Button variant="outline" className="rounded-xl" onClick={() => setPendingPriority(null)}>Cancel</Button>
               <Button
                 className="rounded-xl"
-                disabled={updateMutation.isPending || commentMutation.isPending}
+                disabled={ticketBusy || commentMutation.isPending}
                 onClick={applyPriorityChange}
               >
-                {(updateMutation.isPending || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {(ticketBusy || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 Confirm
               </Button>
             </DialogFooter>
@@ -456,10 +395,10 @@ export default function TicketDetail() {
               </Button>
               <Button
                 className={`rounded-xl ${isClosing ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''}`}
-                disabled={!remarksText.trim() || updateMutation.isPending || commentMutation.isPending}
+                disabled={!remarksText.trim() || ticketBusy || commentMutation.isPending}
                 onClick={() => applyStatusChange(pendingStatus!, remarksText)}
               >
-                {(updateMutation.isPending || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {(ticketBusy || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {isClosing ? 'Confirm Close' : `Mark as ${STATUS_LABEL[pendingStatus ?? '']}`}
               </Button>
             </DialogFooter>
@@ -792,7 +731,7 @@ export default function TicketDetail() {
                         <Select
                           value={ticket.status}
                           onValueChange={handleStatusSelect}
-                          disabled={updateMutation.isPending || getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).length === 0}
+                          disabled={ticketBusy || getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).length === 0}
                         >
                           <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                           <SelectContent>
@@ -812,7 +751,7 @@ export default function TicketDetail() {
                           <Select
                             value={ticket.priority}
                             onValueChange={(val) => { if (val !== ticket.priority) setPendingPriority(val); }}
-                            disabled={updateMutation.isPending}
+                            disabled={ticketBusy}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -838,7 +777,7 @@ export default function TicketDetail() {
                                 });
                               }
                             }}
-                            disabled={updateMutation.isPending}
+                            disabled={ticketBusy}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -858,7 +797,7 @@ export default function TicketDetail() {
                           <Select
                             value={ticket.assignedTo?.id ?? "unassigned"}
                             onValueChange={(v) => handleAssign(v === "unassigned" ? null : v)}
-                            disabled={updateMutation.isPending || ticket.status === "resolved"}
+                            disabled={ticketBusy || ticket.status === "resolved"}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                             <SelectContent>
@@ -892,10 +831,10 @@ export default function TicketDetail() {
                             <Button
                               variant="outline"
                               className="mt-2 w-full rounded-xl"
-                              disabled={updateMutation.isPending}
+                              disabled={ticketBusy}
                               onClick={() => handleAssign(user!.id)}
                             >
-                              {updateMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}
+                              {ticketBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}
                               Assign to Me
                             </Button>
                           )}

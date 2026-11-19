@@ -334,6 +334,32 @@ export function useUpdateTicket() {
   });
 }
 
+export function useChangeTicketWithActivity() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, expectedUpdatedAt, changes, remarks }: {
+      id: string;
+      expectedUpdatedAt: string;
+      changes: { status?: TicketStatus; priority?: TicketPriority; assigned_to?: string | null };
+      remarks?: string | null;
+    }) => {
+      const { data, error } = await supabase.rpc('update_ticket_with_activity', {
+        p_ticket_id: id, p_expected_updated_at: expectedUpdatedAt,
+        p_changes: changes, p_remarks: remarks ?? null,
+      });
+      if (error) throw error;
+      if (data !== id) throw new Error('Ticket change response was not confirmed');
+    },
+    onSettled: (_data, _error, { id }) => {
+      qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['ticketSummary'] });
+      qc.invalidateQueries({ queryKey: ['ticket', id] });
+      qc.invalidateQueries({ queryKey: ['dashboardStats'] });
+      qc.invalidateQueries({ queryKey: ['staffWorkload'] });
+    },
+  });
+}
+
 export function useAddTicketComment() {
   const qc = useQueryClient();
   return useMutation({

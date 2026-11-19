@@ -1,0 +1,26 @@
+# User-operated signed-in Supabase checks — plan, not executed
+
+The user selected dedicated, user-operated test accounts. Do not put passwords, temporary passwords, access/refresh tokens, API keys or session cookies in chat, screenshots or test notes. These checks do not authorize a production migration, frontend or Edge Function deployment, cleanup, reset, deletion, or changes to existing business records. No test accounts or records have been created by this plan. The existing retention policy and its exact period still need to be supplied before implementing or approving an audit retention rule.
+
+## Proposed preparation — review before production changes
+
+1. Confirm the **target** is `DOST02-ITSMART`, not the old project. Record the currently deployed frontend commit and migration/Edge Function versions; the local prepared branch is not the production deployment.
+2. Agree separate production permission for three dedicated accounts: one administrator, one support staff and one general user, each with a distinct email controlled by the tester. Use names prefixed `[ITSMART TEST]`; do not reuse or reset an existing real person's account. Do not share addresses or passwords in chat. User Management account creation changes production Auth and profiles; it must be explicitly approved before execution. The current live create/reset functions are older than the locally prepared mitigations, and uncertain or partial outcomes must be checked before retrying.
+3. Agree permission for a small number of clearly marked synthetic tickets/assets and associated comments/maintenance records, and a retention/cleanup decision **before** creating them. Creating or changing them can emit notifications, history, audit entries and cron side effects and consume permanent ticket/asset identifiers. Do not delete data as cleanup without separate approval; retain a private list of test identifiers. Do not modify existing business tickets, assets, profiles or passwords.
+4. On Windows 11 use separate browser profiles or private windows for the three roles, so sessions do not replace one another. Keep administrator recovery access available. Avoid sharing or recording credentials, tokens or personal data. Use a trusted browser and the production URL already in use; don't use a local-host URL or a copied API key.
+
+## Phase A — current deployed system, after test-account approval
+
+For each dedicated account sign in and record only PASS/FAIL, role, deployed build and a sanitized error if any. Verify the temporary-password prompt and change using that test account, then sign out and sign back in with the new password. Verify the admin can reach User Management, support cannot, and general user cannot. Check the general user's All tickets view is organization-wide and another person's existing tickets are read-only, without opening sensitive data unnecessarily or editing them. Check support's My Tickets grouping and role-appropriate Type control using only an approved synthetic ticket. These are UI checks, not proof that the password gate is enforced by the server.
+
+## Phase B — approved synthetic business records
+
+Once explicitly approved, create only marked synthetic records. Test a general user's own ticket and another user's denial; support status/assignment and Type, admin priority/assignment, closing with assignee retained, and maintenance according to approved role rules. Stop on unexpected behavior, failure or ambiguous response; capture a sanitized action, role and error, not credentials or personal data. Do not automatically retry uncertain writes. Test cleanup only under a separate approved plan and retention decision. Current production does not yet contain the prepared ticket or asset RPCs; these checks cannot prove the new code works.
+
+## Phase C — separately reviewed migration and frontend deployment only
+
+Once the specific SQL, rollback, ordering and deployment have each been reviewed and approved, repeat the synthetic workflows against the new build. Verify server-derived ticket activity, transaction failure behavior where safely injectable, stale update and disconnected response recovery, asset request retry, status/assignment rules, PM behavior, exports, Realtime and cron. Actual password/session security needs dedicated reset scenarios, old and new sessions, and direct API authorization tests without disclosing tokens. Never use a real account or existing business record for a reset or destructive test. A user-operated browser check alone cannot conclusively prove stale-JWT/RLS protections: an approved technical integration test and correct backend implementation are also necessary.
+
+## Reporting and stop conditions
+
+Share only the tested build/version, role, action, PASS/FAIL and sanitized error. Do not send credentials, secrets, full business records or screenshots containing personal data. Stop and ask before continuing if a test account cannot be created, a temporary password is lost, a write outcome is uncertain, an unexpected record appears, a test would touch existing data, or production differs from the reviewed scope. A configuration inventory is not a recoverable backup. Final cleanup and each production migration remain separately approval-gated.
