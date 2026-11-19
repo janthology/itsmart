@@ -13,6 +13,10 @@ The user selected dedicated, user-operated test accounts and reports they create
 
 For each dedicated account sign in and record only PASS/FAIL, role, deployed build and a sanitized error if any. Verify the temporary-password prompt and change using that test account, then sign out and sign back in with the new password. Verify the admin can reach User Management, support cannot, and general user cannot. Check the general user's All tickets view is organization-wide and another person's existing tickets are read-only, without opening sensitive data unnecessarily or editing them. Check support's My Tickets grouping and role-appropriate Type control using only an approved synthetic ticket. These are UI checks, not proof that the password gate is enforced by the server.
 
+### User-reported Phase A results
+
+The user reported: administrator Users page **PASS**; support Tickets access **PASS** and Users access denied **PASS**; general user All tickets access **PASS** and Users access denied **PASS**. These are user-operated UI observations of the deployed app, not independent verification, an organization-wide completeness check, an attempted unauthorized write, or a direct PostgREST/GoTrue/Realtime security test. No test business records or cleanup were authorized by these results.
+
 ## Phase B — approved synthetic business records
 
 Once explicitly approved, create only marked synthetic records. Test a general user's own ticket and another user's denial; support status/assignment and Type, admin priority/assignment, closing with assignee retained, and maintenance according to approved role rules. Stop on unexpected behavior, failure or ambiguous response; capture a sanitized action, role and error, not credentials or personal data. Do not automatically retry uncertain writes. Test cleanup only under a separate approved plan and retention decision. Current production does not yet contain the prepared ticket or asset RPCs; these checks cannot prove the new code works.

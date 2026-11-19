@@ -359,6 +359,64 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     expect(result.rows[0].total_hold_seconds).toBeGreaterThanOrEqual(7215);
     await expect(db.query(sql, [held.rows[0].id, version.rows[0].updated_at, JSON.stringify({ title: 'Forbidden' }), null])).rejects.toThrow(/Invalid ticket change/);
   });
+  it('characterizes why prototype RLS alone cannot protect real SECURITY DEFINER business functions', async () => {
+    // The whole experiment is rolled back. It deliberately demonstrates a
+    // bypass, not a production exploit or a complete authorization audit.
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); BEGIN;");
+    try {
+      await db.exec("CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)");
+      await db.exec(readFileSync(new URL('../../../../supabase/proposals/password-gate/operations.sql', import.meta.url), 'utf8'));
+      await db.exec(readFileSync(new URL('../../../../supabase/proposals/password-gate/authorization.sql', import.meta.url), 'utf8'));
+      const sid = '10000000-0000-4000-8000-000000000009';
+      await db.query('INSERT INTO auth.sessions(id,user_id) VALUES ($1,$2)', [sid,support]);
+      await db.exec('SET LOCAL ROLE service_role');
+      await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [support,'20000000-0000-4000-8000-000000000009']);
+      await db.exec('RESET ROLE');
+      await db.query("SELECT set_config('request.jwt.claim.sub',$1,true), set_config('request.jwt.claims',$2,true)", [support,JSON.stringify({ session_id: sid })]);
+      await db.exec('SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.prototype_password_gate_status() AS phase')).rows).toEqual([{ phase: 'resetting' }]);
+      expect((await db.query('SELECT id FROM assets')).rows).toEqual([]);
+      expect((await db.query('SELECT public.get_my_role() AS role')).rows).toEqual([{ role: 'support_staff' }]);
+      // This prepared (not live-deployed) RPC bypasses table RLS because its
+      // owner executes it and its role check has no trusted gate check.
+      const asset = await db.query<{id: string}>("SELECT (public.create_asset_with_history($1,$2::jsonb)).id AS id", [
+        '40000000-0000-4000-8000-000000000019',JSON.stringify({ name: 'Synthetic definer bypass',category: 'laptop',pm_required: false }),
+      ]);
+      expect(asset.rows).toHaveLength(1);
+      // The maintenance RPC exists in the live workflow, but this test only
+      // exercises a synthetic schema, without hosted gateway or JWT behavior.
+      const maintenance = await db.query("SELECT public.record_asset_maintenance($1,'corrective',CURRENT_DATE,$2,'Synthetic definer bypass',NULL,$3) AS id", [
+        asset.rows[0].id,support,'40000000-0000-4000-8000-000000000020',
+      ]);
+      expect(maintenance.rows[0]).toHaveProperty('id');
+      expect((await db.query('SELECT id FROM asset_maintenance_log')).rows).toEqual([]);
+      // Experiment with two foundational role helpers. This closes these two
+      // examples only; other definer paths and Edge functions may still bypass.
+      await db.exec('RESET ROLE');
+      await db.exec(readFileSync(new URL('../../../../supabase/proposals/password-gate/role-helpers.sql', import.meta.url), 'utf8'));
+      await db.exec('SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.get_my_role() AS role, public.is_active_user() AS active')).rows).toEqual([{ role: null, active: false }]);
+      await db.exec('SAVEPOINT asset_attempt');
+      await expect(db.query("SELECT public.create_asset_with_history($1,$2::jsonb)", ['40000000-0000-4000-8000-000000000021',JSON.stringify({name:'Denied',category:'laptop',pm_required:false})])).rejects.toThrow(/Only active administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT asset_attempt; SAVEPOINT maintenance_attempt');
+      await expect(db.query("SELECT public.record_asset_maintenance($1,'corrective',CURRENT_DATE,$2,'Denied',NULL,$3)", [asset.rows[0].id,support,'40000000-0000-4000-8000-000000000022'])).rejects.toThrow(/Only active administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT maintenance_attempt; RESET ROLE; SET LOCAL ROLE service_role');
+      await db.query('SELECT public.prototype_finish_password_reset($1,$2)', [support,'20000000-0000-4000-8000-000000000009']);
+      await db.query('SELECT public.prototype_begin_password_change($1,$2)', [support,'20000000-0000-4000-8000-000000000010']);
+      // A service assertion is NOT evidence of an actual Auth password change.
+      await db.query('SELECT public.prototype_finish_password_change($1,$2)', [support,'20000000-0000-4000-8000-000000000010']);
+      await db.exec('RESET ROLE; SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.get_my_role() AS role')).rows).toEqual([{ role: null }]);
+      await db.exec('RESET ROLE');
+      const newSid = '10000000-0000-4000-8000-000000000010';
+      await db.query('INSERT INTO auth.sessions(id,user_id,created_at) VALUES ($1,$2,clock_timestamp())',[newSid,support]);
+      await db.query("SELECT set_config('request.jwt.claims',$1,true)",[JSON.stringify({session_id:newSid})]);
+      await db.exec('SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.get_my_role() AS role, public.is_active_user() AS active')).rows).toEqual([{role:'support_staff',active:true}]);
+    } finally {
+      await db.exec('RESET ROLE; ROLLBACK');
+    }
+  });
   it('rollback restores the old function definitions in the full synthetic schema', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
     await db.exec(readFileSync(new URL('../../../../supabase/rollbacks/20261101000014_ticket_and_asset_write_guards.sql', import.meta.url), 'utf8'));
