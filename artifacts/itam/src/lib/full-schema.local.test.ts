@@ -254,6 +254,10 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     expect((ordinary.rows[0] as { ticket_number: string }).ticket_number).toMatch(/^DOST02-ITS\d{4}100002$/);
     await asUser(admin);
     await db.query("DELETE FROM tickets WHERE title='LOCAL-ALLOC-GENERAL'");
+    await db.exec('RESET ROLE; SET ROLE service_role');
+    await expect(db.query('SELECT * FROM public.ticket_number_counters')).rejects.toThrow(/permission denied/);
+    await expect(db.query('UPDATE public.ticket_number_counters SET last_issued=1')).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE');
   });
   it('records ticket and asset changes transactionally with a server-derived actor', async () => {
     await asUser(admin);

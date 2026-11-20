@@ -1,4 +1,6 @@
-# System remediation — stage 2, locally prepared
+# System remediation — stage 2
+
+**Production update:** the asset-history actor guard (`00015`) and ticket allocator (`00016`) were applied as live versions `20261120194748` and `20261120194900`. See `production-remediation-november-20.md` for the exact applied SQL, verification and rollback limits. The SLA migration (`00017`) remains unapplied. Descriptions below are the earlier preparation snapshot except where explicitly updated.
 
 **Later local update:** stage 3 replaces the vulnerable spreadsheet writer, prepares atomic asset creation and further updates dependencies. See `security-remediation-stage-3.md` for the latest audit result and remaining limitations; the dependency counts and unresolved asset-allocation statement below describe the earlier stage-2 snapshot.
 

@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS public.ticket_number_counters (
   last_issued bigint NOT NULL CHECK (last_issued > 0)
 );
 ALTER TABLE public.ticket_number_counters ENABLE ROW LEVEL SECURITY;
-REVOKE ALL ON public.ticket_number_counters FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON public.ticket_number_counters FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.generate_ticket_number()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
