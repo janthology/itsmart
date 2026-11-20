@@ -139,6 +139,113 @@ test('audit viewer reports a missing stream instead of an empty list', async ({ 
   await expect(page.getByText('No audit events on this page')).toHaveCount(0);
 });
 
+async function mockPasswordEndpoints(page: Page, mode: 'lost' | 'success') {
+  const profile = profiles[2];
+  const user = { id: profile.id, email: profile.email, created_at: profile.created_at, app_metadata: { role: profile.role }, user_metadata: { full_name: profile.full_name }, aud: 'authenticated', role: 'authenticated' };
+  const token = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ sub: user.id, exp: 4102444800 })).toString('base64url')}.signature`;
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, PUT, OPTIONS' };
+  await page.route('**/auth/v1/token*', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify({ access_token: token, refresh_token: 'fake-refresh', expires_in: 3600, expires_at: 4102444800, token_type: 'bearer', user }) });
+  });
+  let writes = 0;
+  await page.route('**/auth/v1/user', async (route, request) => {
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (request.method() === 'PUT') {
+      writes++;
+      if (mode === 'lost') return route.abort('failed');
+    }
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(user) });
+  });
+  return () => writes;
+}
+
+test('ambiguous password change requires review even after reload', async ({ page }) => {
+  await syntheticSession(page, 'general_user');
+  const writes = await mockPasswordEndpoints(page, 'lost');
+  await page.goto('/change-password');
+  await page.getByLabel('Current Password', { exact: true }).fill('OldPassword1!');
+  await page.getByLabel('New Password', { exact: true }).fill('NewPassword2!');
+  await page.getByLabel('Confirm New Password').fill('NewPassword2!');
+  await page.getByRole('button', { name: /change password/i }).click();
+  await expect(page.getByText('A previous password change was not fully confirmed.')).toBeVisible();
+  expect(writes()).toBe(1);
+  await page.reload();
+  await expect(page.getByText('A previous password change was not fully confirmed.')).toBeVisible();
+  expect(writes()).toBe(1);
+  await page.getByRole('button', { name: /I reviewed the result/i }).click();
+  await expect(page.getByLabel('Current Password', { exact: true })).toBeVisible();
+  expect(writes()).toBe(1);
+});
+
+test('password change completes profile update and removes the review marker', async ({ page }) => {
+  await syntheticSession(page, 'general_user');
+  const writes = await mockPasswordEndpoints(page, 'success');
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, OPTIONS' };
+  await page.route('**/rest/v1/profiles*', async (route, request) => {
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (request.method() === 'PATCH') return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify([{ id: profiles[2].id }]) });
+    return route.fallback();
+  });
+  await page.goto('/change-password');
+  await page.getByLabel('Current Password', { exact: true }).fill('OldPassword1!');
+  await page.getByLabel('New Password', { exact: true }).fill('NewPassword2!');
+  await page.getByLabel('Confirm New Password').fill('NewPassword2!');
+  await page.getByRole('button', { name: /change password/i }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  expect(writes()).toBe(1);
+  await page.goto('/change-password');
+  await expect(page.getByLabel('Current Password', { exact: true })).toBeVisible();
+  await expect(page.getByText('A previous password change was not fully confirmed.')).toHaveCount(0);
+});
+
+test('profile update retry does not repeat a confirmed Auth password change', async ({ page }) => {
+  await syntheticSession(page, 'general_user');
+  const writes = await mockPasswordEndpoints(page, 'success');
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, PATCH, OPTIONS' };
+  let patches = 0;
+  await page.route('**/rest/v1/profiles*', async (route, request) => {
+    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    if (request.method() === 'PATCH') {
+      patches++;
+      return route.fulfill({ status: patches === 1 ? 500 : 200, headers, contentType: 'application/json', body: JSON.stringify(patches === 1 ? { message: 'Synthetic failure' } : [{ id: profiles[2].id }]) });
+    }
+    return route.fallback();
+  });
+  await page.goto('/change-password');
+  await page.getByLabel('Current Password', { exact: true }).fill('OldPassword1!');
+  await page.getByLabel('New Password', { exact: true }).fill('NewPassword2!');
+  await page.getByLabel('Confirm New Password').fill('NewPassword2!');
+  await page.getByRole('button', { name: /change password/i }).click();
+  await expect(page.getByText('Your new password is active, but the account update is incomplete.')).toBeVisible();
+  expect(writes()).toBe(1);
+  await page.getByRole('button', { name: 'Retry account update' }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  expect(writes()).toBe(1);
+  expect(patches).toBe(2);
+  await page.goto('/change-password');
+  await expect(page.getByLabel('Current Password', { exact: true })).toBeVisible();
+});
+
+test('password change blocks the Auth mutation if its marker cannot be saved', async ({ page }) => {
+  await syntheticSession(page, 'general_user');
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (key.startsWith('itsmart:password-change-review:')) throw new Error('Synthetic storage failure');
+      return original.call(this, key, value);
+    };
+  });
+  const writes = await mockPasswordEndpoints(page, 'success');
+  await page.goto('/change-password');
+  await page.getByLabel('Current Password', { exact: true }).fill('OldPassword1!');
+  await page.getByLabel('New Password', { exact: true }).fill('NewPassword2!');
+  await page.getByLabel('Confirm New Password').fill('NewPassword2!');
+  await page.getByRole('button', { name: /change password/i }).click();
+  await expect(page.getByText(/this tab cannot safely store or read a review marker/i)).toBeVisible();
+  expect(writes()).toBe(0);
+});
+
 test('AUDIT: password inputs have programmatically associated labels', async ({ page }) => {
   await syntheticSession(page, 'general_user');
   await page.goto('/change-password');
