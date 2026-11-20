@@ -111,6 +111,34 @@ try {
   assert.equal(notifications.rows[0].total, 1);
   console.log('PASS: 16 overlapping SLA jobs created exactly one delivery and notification for the same requester/assignee.');
 
+  // Reopen while a job's candidate row is locked. The waiting job must use
+  // the committed ticket version and record the new cycle, not the old one.
+  const reopening = await pool.connect();
+  const job = await pool.connect();
+  try {
+    await reopening.query('BEGIN');
+    await reopening.query("UPDATE public.tickets SET status='resolved' WHERE id=$1", [ticketId]);
+    await reopening.query("UPDATE public.tickets SET status='in_progress' WHERE id=$1", [ticketId]);
+    const pid = (await job.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    const jobResult = job.query('SELECT public.notify_sla_at_risk()');
+    let blocked = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const state = await pool.query('SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1', [pid]);
+      if (state.rows[0]?.wait_event_type === 'Lock') { blocked = true; break; }
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    if (!blocked) { await reopening.query('ROLLBACK'); await jobResult; throw new Error('Expected SLA job to wait for reopen lock'); }
+    await reopening.query('COMMIT');
+    await jobResult;
+    const cycles = await pool.query('SELECT cycle::int AS cycle FROM public.sla_notification_deliveries WHERE ticket_id=$1 ORDER BY cycle', [ticketId]);
+    assert.deepEqual(cycles.rows, [{ cycle: 0 }, { cycle: 1 }]);
+    const repeated = await pool.query("SELECT count(*)::int AS total FROM public.notifications WHERE link=$1 AND type='sla_at_risk'", [`/tickets/${ticketId}`]);
+    assert.equal(repeated.rows[0].total, 2);
+    console.log('PASS: a concurrent reopen and waiting SLA job recorded the new cycle exactly once.');
+  } finally { reopening.release(); job.release(); }
+  // Later workflow tests need an actual open -> in_progress transition.
+  await pool.query("UPDATE public.tickets SET status='open' WHERE id=$1", [ticketId]);
+
   // Minimal synthetic Auth/profile/asset schema for real concurrent RPC calls;
   // this is not the hosted Supabase Auth or PostgREST stack.
   await pool.query(`
@@ -203,6 +231,9 @@ try {
     GRANT SELECT ON public.profiles TO authenticated;
     GRANT INSERT ON public.ticket_comments TO authenticated;
   `);
+  // The synthetic schema changes ticket.status from text to enum above, unlike
+  // production. Recreate the trigger function to invalidate cached text plans.
+  await pool.query(slaMigration);
   const workflowMigration = readFileSync(new URL('../../../supabase/migrations/20261101000020_ticket_change_with_activity.sql', import.meta.url), 'utf8');
   await pool.query(workflowMigration);
   const version = await pool.query('SELECT updated_at::text AS updated_at FROM public.tickets WHERE id=$1', [ticketId]);
@@ -221,6 +252,9 @@ try {
       throw error;
     } finally { client.release(); }
   }));
+  if (concurrentChanges.every(result => result.status === 'rejected')) {
+    throw new AggregateError(concurrentChanges.map(result => result.reason), 'Both ticket workflow calls failed');
+  }
   assert.equal(concurrentChanges.filter(result => result.status === 'fulfilled').length, 1);
   const rejectedChange = concurrentChanges.find(result => result.status === 'rejected');
   assert.match(String(rejectedChange?.reason), /refresh and try again/);

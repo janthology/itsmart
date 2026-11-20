@@ -34,6 +34,12 @@ beforeAll(async () => {
   `);
   const files = readdirSync(migrationsDir).filter(name => name.endsWith('.sql')).sort();
   for (const name of files) {
+    if (name === '20261101000017_sla_recipient_dedup.sql') {
+      // A pre-cutover notification must seed the initial alert cycle exactly once.
+      await db.exec(`INSERT INTO auth.users(id,email) VALUES ('00000000-0000-4000-8000-000000000080','seed@example.test');
+        INSERT INTO tickets(id,title,created_by,priority,status,created_at) VALUES ('00000000-0000-4000-8000-000000000081','LOCAL-SLA-PRECUTOVER','00000000-0000-4000-8000-000000000080','critical','in_progress',now()-interval '3 hours 10 minutes');
+        INSERT INTO notifications(user_id,type,title,link) VALUES ('00000000-0000-4000-8000-000000000080','sla_at_risk','Prior','/tickets/00000000-0000-4000-8000-000000000081');`);
+    }
     // PGlite cannot run pg_cron; the cron API above stores definitions only.
     const sql = script(name).replace('CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;', '-- pg_cron is replaced by an inert local test shim');
     try { await db.exec(sql); } catch (error) { throw new Error(`Migration ${name} failed`, { cause: error }); }
@@ -164,7 +170,7 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     await asUser(support);
     await expect(db.query(insert, [id, admin])).rejects.toThrow(/row-level security/);
   });
-  it('deduplicates SLA delivery per ticket, stage and recipient even after deletion or reopen', async () => {
+  it('deduplicates per recipient and stage within a cycle, and repeats on reopening', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
     const ticket = await db.query("INSERT INTO tickets(title,created_by,assigned_to,priority,status,created_at) VALUES ('LOCAL-SLA',$1,$1,'critical','in_progress',now()-interval '3 hours 10 minutes') RETURNING id", [support]);
     const id = (ticket.rows[0] as { id: string }).id;
@@ -176,26 +182,39 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     await db.exec('SELECT public.notify_sla_at_risk();');
     expect(await recipients('sla_at_risk')).toEqual([general, support].sort());
     await db.query("DELETE FROM notifications WHERE link=$1 AND type='sla_at_risk'", [link]);
-    await db.query("UPDATE tickets SET status='resolved' WHERE id=$1", [id]);
-    await db.query("UPDATE tickets SET status='in_progress' WHERE id=$1", [id]);
+    await db.query('UPDATE tickets SET assigned_to=$2 WHERE id=$1', [id, support]);
     await db.exec('SELECT public.notify_sla_at_risk();');
-    expect(await recipients('sla_at_risk')).toEqual([]); // the durable ledger survives deletion/reopen
+    expect(await recipients('sla_at_risk')).toEqual([]); // deletion and reassignment do not reset the current cycle
+    await db.query('UPDATE tickets SET assigned_to=$2 WHERE id=$1', [id, general]);
+    await db.query("UPDATE tickets SET status='resolved' WHERE id=$1", [id]);
+    await db.query("UPDATE tickets SET status='closed' WHERE id=$1", [id]);
+    await db.query("UPDATE tickets SET status='in_progress' WHERE id=$1", [id]);
+    await db.exec('SELECT public.notify_sla_at_risk(); SELECT public.notify_sla_at_risk();');
+    expect(await recipients('sla_at_risk')).toEqual([general, support].sort());
+    expect((await db.query('SELECT sla_alert_cycle FROM tickets WHERE id=$1',[id])).rows).toEqual([{sla_alert_cycle:1}]);
     await db.query("UPDATE tickets SET created_at=now()-interval '5 hours' WHERE id=$1", [id]);
     await db.exec('SELECT public.notify_sla_breached(); SELECT public.notify_sla_breached();');
     expect(await recipients('sla_breached')).toEqual([general, support].sort());
     await asUser(support);
     await expect(db.query('SELECT * FROM sla_notification_deliveries')).rejects.toThrow(/permission denied/);
     await expect(db.query('SELECT public.notify_sla_at_risk()')).rejects.toThrow(/permission denied/);
+    expect((await db.query('UPDATE tickets SET sla_alert_cycle=999 WHERE id=$1 RETURNING sla_alert_cycle',[id])).rows).toEqual([{sla_alert_cycle:1}]);
+    await db.exec('RESET ROLE; SET ROLE service_role');
+    await expect(db.query('SELECT * FROM sla_notification_deliveries')).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE');
   });
-  it('seeds existing alerts, preserves holds, and rolls back the ledger if notification insertion fails', async () => {
+  it('seeds existing alerts once, preserves holds, and rolls back the ledger if notification insertion fails', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
-    const risk = await db.query("INSERT INTO tickets(title,created_by,priority,status,created_at) VALUES ('LOCAL-SLA-SEED',$1,'critical','in_progress',now()-interval '3 hours 10 minutes') RETURNING id", [second]);
-    const id = (risk.rows[0] as { id: string }).id;
+    const id = '00000000-0000-4000-8000-000000000081';
     const link = `/tickets/${id}`;
-    await db.query("INSERT INTO notifications(user_id,type,title,link) VALUES ($1,'sla_at_risk','Existing',$2)", [second, link]);
-    await db.exec(script('20261101000017_sla_recipient_dedup.sql')); // seed currently present notifications
+    expect((await db.query('SELECT cycle FROM sla_notification_deliveries WHERE ticket_id=$1',[id])).rows).toEqual([{cycle:0}]);
     await db.exec('SELECT public.notify_sla_at_risk();');
     expect((await db.query("SELECT id FROM notifications WHERE link=$1 AND type='sla_at_risk'", [link])).rows).toHaveLength(1);
+    await db.query("UPDATE tickets SET status='resolved' WHERE id=$1", [id]);
+    await db.query("UPDATE tickets SET status='in_progress' WHERE id=$1", [id]);
+    await db.exec(script('20261101000017_sla_recipient_dedup.sql')); // reapply must not re-seed old alerts into the new cycle
+    await db.exec('SELECT public.notify_sla_at_risk();');
+    expect((await db.query("SELECT id FROM notifications WHERE link=$1 AND type='sla_at_risk'", [link])).rows).toHaveLength(2);
     const held = await db.query("INSERT INTO tickets(title,created_by,priority,status,created_at) VALUES ('LOCAL-SLA-HOLD',$1,'critical','on_hold',now()-interval '5 hours') RETURNING id", [second]);
     await db.exec('SELECT public.notify_sla_breached();');
     expect((await db.query("SELECT ticket_id FROM sla_notification_deliveries WHERE ticket_id=$1", [(held.rows[0] as { id: string }).id])).rows).toHaveLength(0);

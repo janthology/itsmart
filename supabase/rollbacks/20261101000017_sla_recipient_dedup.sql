@@ -1,5 +1,8 @@
 -- Restores the earlier functions and their ticket-wide deduplication bugs.
--- The protected delivery ledger is retained; the old functions do not use it.
+-- The protected delivery ledger, ticket cycle column, and cycle-maintenance
+-- trigger are retained; the old alert functions ignore them. The retained
+-- trigger keeps tracking reopens while rolled back, but alerts sent by old
+-- functions are not recorded in the ledger and may repeat after reapplication.
 -- Apply only after explicit approval and live drift checks.
 
 CREATE OR REPLACE FUNCTION public.notify_sla_at_risk()

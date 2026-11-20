@@ -1,6 +1,6 @@
 # Vercel preview readiness — not yet deployable
 
-**Production update:** actor guard `00015` and ticket allocator `00016` were subsequently applied; see `production-remediation-november-20.md`. Trusted password enforcement and other deployment blockers remain unresolved. The Vercel connector was disconnected at the latest check, and this branch's auto-deployment remains disabled.
+**Production update:** actor guard `00015`, ticket allocator `00016`, and the revised reopen-aware SLA alert migration `00017` were applied; see `production-remediation-november-20.md` and `sla-reopen-alert-policy.md`. Trusted password enforcement and other deployment blockers remain unresolved. The Vercel connector is now connected; the `itsmart-dost02` project is linked to `janthology/itsmart`, and Vercel confirms the branch preview is still at `75d6444`. Production was last promoted from `a8e7204`. No new deployment or settings change has been made; this branch's automatic deployment remains disabled.
 
 The user requested a Vercel preview and selected the **current production ITSMART database** as its backend. A Vercel preview is a frontend deployment, **not an isolated database**: its users can affect real production data. Do not deploy this branch against production while its dependencies are missing. Automatic Vercel deployment remains disabled for `arena/fbb1e145-itsmart`; don't remove that protection until a reviewed rollout is ready. Selecting the backend is not approval for a database migration, Edge Function deployment, reset or deletion.
 
