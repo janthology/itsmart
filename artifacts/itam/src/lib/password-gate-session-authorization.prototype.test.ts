@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 // actual password verification, GoTrue race, Edge broker or Realtime here.
 const user = '00000000-0000-4000-8000-000000000001';
 const other = '00000000-0000-4000-8000-000000000002';
+const target = '00000000-0000-4000-8000-000000000003';
 const late = '10000000-0000-4000-8000-000000000001';
 const verified = '10000000-0000-4000-8000-000000000002';
 const otherSession = '10000000-0000-4000-8000-000000000003';
@@ -33,10 +34,10 @@ beforeAll(async () => {
     CREATE SCHEMA auth; CREATE SCHEMA private;
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     CREATE TABLE auth.users(id uuid PRIMARY KEY,email text NOT NULL);
-    INSERT INTO auth.users(id,email) VALUES ('${user}','synthetic@example.invalid'),('${other}','other@example.invalid');
+    INSERT INTO auth.users(id,email) VALUES ('${user}','synthetic@example.invalid'),('${other}','other@example.invalid'),('${target}','target@example.invalid');
     CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),not_after timestamptz);
     CREATE TABLE public.profiles(id uuid PRIMARY KEY,role text NOT NULL,is_active boolean NOT NULL DEFAULT true,must_change_password boolean NOT NULL DEFAULT false,password_changed_at timestamptz);
-    INSERT INTO profiles(id,role) VALUES ('${user}','administrator'),('${other}','general_user');
+    INSERT INTO profiles(id,role) VALUES ('${user}','administrator'),('${other}','general_user'),('${target}','support_staff');
     GRANT USAGE ON SCHEMA public,private,auth TO authenticated,service_role;
     ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
     GRANT SELECT,INSERT,UPDATE,DELETE ON profiles TO authenticated,service_role;
@@ -53,6 +54,7 @@ beforeAll(async () => {
   await db.exec(load('operations.sql'));
   await db.exec(load('authorization.sql'));
   await db.exec(load('session-authorization.sql'));
+  await db.exec(load('reset-authorization.sql'));
   await service();
   await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [user, reset]);
   await db.query('SELECT public.prototype_finish_password_reset($1,$2)', [user, reset]);
@@ -95,6 +97,25 @@ describe('explicit session admission prototype (not integrated)', () => {
     expect(await access()).toEqual([{ allowed: false }]);
     await asUser(verified, other);
     expect(await access()).toEqual([{ allowed: false }]);
+  });
+  it('authorizes an admin reset only from a live admitted administrator session', async () => {
+    const operation = '20000000-0000-4000-8000-000000000099';
+    const sql = 'SELECT public.prototype_begin_authorized_password_reset($1,$2,$3,$4)';
+    await asUser(verified);
+    await expect(db.query(sql, [target,user,verified,operation])).rejects.toThrow(/permission denied/);
+    await service();
+    await expect(db.query(sql, [user,user,verified,operation])).rejects.toThrow(/Reset unavailable/);
+    await expect(db.query(sql, [target,user,late,operation])).rejects.toThrow(/Reset unavailable/);
+    await expect(db.query(sql, [target,other,otherSession,operation])).rejects.toThrow(/Reset unavailable/);
+    await db.exec(`RESET ROLE; UPDATE profiles SET is_active=false WHERE id='${user}'`);
+    await service();
+    await expect(db.query(sql, [target,user,verified,operation])).rejects.toThrow(/Reset unavailable/);
+    await db.exec(`RESET ROLE; UPDATE profiles SET is_active=true WHERE id='${user}'`);
+    await service();
+    await db.query(sql, [target,user,verified,operation]);
+    await db.exec('RESET ROLE');
+    expect((await db.query('SELECT phase,operation_id FROM password_operation_prototype WHERE user_id=$1', [target])).rows).toEqual([{phase:'resetting',operation_id:operation}]);
+    expect((await db.query('SELECT must_change_password FROM profiles WHERE id=$1', [target])).rows).toEqual([{must_change_password:true}]);
   });
   it('invalidates admitted sessions when reset begins and rejects a stale snapshot after completion', async () => {
     await db.exec(`RESET ROLE; UPDATE auth.sessions SET created_at=now()-interval '1 day' WHERE id='${verified}'`);

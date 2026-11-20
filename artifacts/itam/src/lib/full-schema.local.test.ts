@@ -440,7 +440,12 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     const load = (name: string) => readFileSync(new URL(`../../../../supabase/proposals/password-gate/${name}`, import.meta.url), 'utf8');
     try {
       await db.exec('CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)');
-      for (const name of ['operations.sql', 'authorization.sql', 'session-authorization.sql', 'admission-integration.sql', 'role-helpers.sql']) await db.exec(load(name));
+      for (const name of ['operations.sql', 'authorization.sql', 'session-authorization.sql', 'admission-integration.sql', 'role-helpers.sql', 'onboarding.sql']) await db.exec(load(name));
+      // A newly inserted Auth user must be born blocked in the same transaction.
+      const newUser = '00000000-0000-4000-8000-000000000090';
+      await db.query("INSERT INTO auth.users(id,email,raw_user_meta_data) VALUES ($1,'new@example.invalid','{\"full_name\":\"Synthetic new user\"}')", [newUser]);
+      expect((await db.query('SELECT phase FROM password_operation_prototype WHERE user_id=$1',[newUser])).rows).toEqual([{phase:'required'}]);
+      expect((await db.query('SELECT must_change_password FROM profiles WHERE id=$1',[newUser])).rows).toEqual([{must_change_password:true}]);
       await db.exec('SET LOCAL ROLE service_role');
       await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [support,reset]);
       await db.query('SELECT public.prototype_finish_password_reset($1,$2)', [support,reset]);

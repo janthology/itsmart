@@ -335,9 +335,9 @@ export default function Login() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-[11px] font-medium text-muted-foreground">Email</FormLabel>
-                        <FormControl>
-                          <div className="group relative">
-                            <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
+                        <div className="group relative">
+                          <Mail className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
+                          <FormControl>
                             <Input
                               type="email"
                               autoComplete="email"
@@ -347,8 +347,8 @@ export default function Login() {
                               {...field}
                               className="h-10 rounded-lg bg-background pl-9 text-sm placeholder:text-muted-foreground/60"
                             />
-                          </div>
-                        </FormControl>
+                          </FormControl>
+                        </div>
                         <FormMessage className="text-xs" />
                       </FormItem>
                     )}
@@ -360,9 +360,9 @@ export default function Login() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel className="text-[11px] font-medium text-muted-foreground">Password</FormLabel>
-                        <FormControl>
-                          <div className="group relative">
-                            <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
+                        <div className="group relative">
+                          <Lock className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 group-focus-within:text-primary" />
+                          <FormControl>
                             <Input
                               type={showPassword ? "text" : "password"}
                               autoComplete="current-password"
@@ -373,17 +373,17 @@ export default function Login() {
                               onKeyUp={(e) => setCapsLockOn(e.getModifierState?.("CapsLock") ?? false)}
                               className="h-10 rounded-lg bg-background pl-9 pr-10 text-sm placeholder:text-muted-foreground/60"
                             />
-                            <button
-                              type="button"
-                              onClick={() => setShowPassword((v) => !v)}
-                              disabled={isPending}
-                              aria-label={showPassword ? "Hide password" : "Show password"}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
-                            >
-                              {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                            </button>
-                          </div>
-                        </FormControl>
+                          </FormControl>
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword((v) => !v)}
+                            disabled={isPending}
+                            aria-label={showPassword ? "Hide password" : "Show password"}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground disabled:opacity-50"
+                          >
+                            {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
                         {capsLockOn && (
                           <p className="flex items-center gap-1 text-[11px] font-medium text-amber-600 dark:text-amber-400">
                             <TriangleAlert className="h-3 w-3" /> Caps Lock is on

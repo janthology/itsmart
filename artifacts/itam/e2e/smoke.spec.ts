@@ -4,8 +4,12 @@ test.describe("signed-out smoke", () => {
   test("login page renders the sign-in form", async ({ page }) => {
     await page.goto("/login");
     await expect(page).toHaveTitle(/ITSMART/);
-    await expect(page.locator('input[type="email"]')).toBeVisible();
-    await expect(page.locator('input[type="password"]')).toBeVisible();
+    await expect(page.getByLabel("Email", { exact: true })).toHaveAttribute("type", "email");
+    await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "password");
+    await page.getByText("Email", { exact: true }).click();
+    await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
+    await page.getByText("Password", { exact: true }).click();
+    await expect(page.getByLabel("Password", { exact: true })).toBeFocused();
   });
 
   test("login Reports animation keeps valid SVG coordinates", async ({ page }) => {
