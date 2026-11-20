@@ -85,6 +85,13 @@ for (const role of ['administrator', 'support_staff', 'general_user'] as const) 
   });
 }
 
+test('admin user management does not advertise an unavailable audit stream', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  await page.goto('/admin/users');
+  await expect(page.getByRole('heading', { name: /User management/i })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Audit log' })).toHaveCount(0);
+});
+
 for (const role of ['support_staff', 'general_user'] as const) {
   test(`${role}: audit page redirects without requesting audit records`, async ({ page }) => {
     await syntheticSession(page, role);
