@@ -427,6 +427,74 @@ describe('full repository migrations in isolated PostgreSQL', () => {
       await db.exec('RESET ROLE; ROLLBACK');
     }
   });
+  it('synthetically applies session admission to table policies and the sampled definer RPCs', async () => {
+    // This experiment is entirely rolled back. The service assertion does not
+    // verify any password; this does not audit all RPCs, sessions or Edge paths.
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); BEGIN;");
+    const sid = '10000000-0000-4000-8000-000000000011';
+    const adminSid = '10000000-0000-4000-8000-000000000012';
+    const reset = '20000000-0000-4000-8000-000000000011';
+    const change = '20000000-0000-4000-8000-000000000012';
+    const adminReset = '20000000-0000-4000-8000-000000000014';
+    const adminChange = '20000000-0000-4000-8000-000000000015';
+    const load = (name: string) => readFileSync(new URL(`../../../../supabase/proposals/password-gate/${name}`, import.meta.url), 'utf8');
+    try {
+      await db.exec('CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)');
+      for (const name of ['operations.sql', 'authorization.sql', 'session-authorization.sql', 'admission-integration.sql', 'role-helpers.sql']) await db.exec(load(name));
+      await db.exec('SET LOCAL ROLE service_role');
+      await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [support,reset]);
+      await db.query('SELECT public.prototype_finish_password_reset($1,$2)', [support,reset]);
+      await db.query('SELECT public.prototype_begin_password_change($1,$2)', [support,change]);
+      await db.query('SELECT public.prototype_finish_password_change($1,$2)', [support,change]);
+      await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [admin,adminReset]);
+      await db.query('SELECT public.prototype_finish_password_reset($1,$2)', [admin,adminReset]);
+      await db.query('SELECT public.prototype_begin_password_change($1,$2)', [admin,adminChange]);
+      await db.query('SELECT public.prototype_finish_password_change($1,$2)', [admin,adminChange]);
+      await db.exec('RESET ROLE');
+      await db.query('INSERT INTO auth.sessions(id,user_id,created_at) VALUES ($1,$2,clock_timestamp()),($3,$4,clock_timestamp())', [sid,support,adminSid,admin]);
+      await db.query("SELECT set_config('request.jwt.claim.sub',$1,true), set_config('request.jwt.claims',$2,true)", [support,JSON.stringify({session_id:sid})]);
+      await db.exec('SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT id FROM assets')).rows).toEqual([]);
+      expect((await db.query('SELECT public.get_my_role() AS role')).rows).toEqual([{role:null}]);
+      await db.exec('SAVEPOINT denied_asset');
+      await expect(db.query('SELECT public.create_asset_with_history($1,$2::jsonb)', ['40000000-0000-4000-8000-000000000031',JSON.stringify({name:'Denied',category:'laptop',pm_required:false})])).rejects.toThrow(/Only active administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT denied_asset; SAVEPOINT denied_schedule');
+      await expect(db.query('SELECT public.update_asset_pm_schedule($1,NULL,NULL,false,NULL,NULL,false)', ['40000000-0000-4000-8000-000000000030'])).rejects.toThrow(/Not authorized/);
+      await db.exec('ROLLBACK TO SAVEPOINT denied_schedule; RESET ROLE; SET LOCAL ROLE service_role');
+      await db.query('SELECT public.prototype_admit_verified_session($1,$2,$3)', [support,sid,change]);
+      await db.exec('RESET ROLE; SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.get_my_role() AS role')).rows).toEqual([{role:'support_staff'}]);
+      const created = await db.query<{id:string}>('SELECT (public.create_asset_with_history($1,$2::jsonb)).id AS id', ['40000000-0000-4000-8000-000000000032',JSON.stringify({name:'Admitted synthetic',category:'laptop',pm_required:false})]);
+      expect(created.rows).toHaveLength(1);
+      await db.query('SELECT public.update_asset_pm_schedule($1,NULL,NULL,false,NULL,NULL,false)', [created.rows[0].id]);
+      const maintenance = await db.query("SELECT public.record_asset_maintenance($1,'corrective',CURRENT_DATE,$2,'Synthetic',NULL,$3) AS id", [created.rows[0].id,support,'40000000-0000-4000-8000-000000000033']);
+      expect(maintenance.rows[0]).toHaveProperty('id');
+      await db.exec('RESET ROLE');
+      await db.query("SELECT set_config('request.jwt.claim.sub',$1,true), set_config('request.jwt.claims',$2,true)", [admin,JSON.stringify({session_id:adminSid})]);
+      await db.exec('SET LOCAL ROLE authenticated; SAVEPOINT denied_correction');
+      await expect(db.query("SELECT public.correct_asset_maintenance($1,$2,'Denied','Denied')", [(maintenance.rows[0] as {id:string}).id,support])).rejects.toThrow(/Only administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT denied_correction; SAVEPOINT denied_return');
+      await expect(db.query('SELECT public.return_asset_to_service($1)', [created.rows[0].id])).rejects.toThrow(/Only active administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT denied_return; RESET ROLE; SET LOCAL ROLE service_role');
+      await db.query('SELECT public.prototype_admit_verified_session($1,$2,$3)', [admin,adminSid,adminChange]);
+      await db.exec('RESET ROLE; SET LOCAL ROLE authenticated');
+      await db.query("SELECT public.correct_asset_maintenance($1,$2,'Corrected','Synthetic correction')", [(maintenance.rows[0] as {id:string}).id,support]);
+      await db.query("UPDATE assets SET status='maintenance' WHERE id=$1",[created.rows[0].id]);
+      await db.query('SELECT public.return_asset_to_service($1)', [created.rows[0].id]);
+      await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',true); SET LOCAL ROLE service_role");
+      await db.query('SELECT public.prototype_begin_password_reset($1,$2)', [support,'20000000-0000-4000-8000-000000000013']);
+      await db.exec('RESET ROLE');
+      await db.query("SELECT set_config('request.jwt.claim.sub',$1,true), set_config('request.jwt.claims',$2,true)",[support,JSON.stringify({session_id:sid})]);
+      await db.exec('SET LOCAL ROLE authenticated');
+      expect((await db.query('SELECT public.get_my_role() AS role')).rows).toEqual([{role:null}]);
+      expect((await db.query('SELECT id FROM assets')).rows).toEqual([]);
+      await db.exec('SAVEPOINT denied_maintenance');
+      await expect(db.query("SELECT public.record_asset_maintenance($1,'corrective',CURRENT_DATE,$2,'Denied',NULL,$3)", [created.rows[0].id,support,'40000000-0000-4000-8000-000000000034'])).rejects.toThrow(/Only active administrators/);
+      await db.exec('ROLLBACK TO SAVEPOINT denied_maintenance');
+    } finally {
+      await db.exec('RESET ROLE; ROLLBACK');
+    }
+  });
   it('removes Supabase-style service default grants from asset counters, request ledger and RPC', async () => {
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
     // Simulate live public-schema defaults even on reapplication over retained tables.

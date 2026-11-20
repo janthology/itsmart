@@ -264,6 +264,65 @@ try {
     passwordService.release();
   }
   console.log('PASS: prototype reset/change leases serialize concurrent operations and reject a stale completion (not a password/security integration test).');
+
+  // Independent synthetic session-admission race; no GoTrue/JWT verification.
+  await pool.query(`CREATE TABLE auth.users(id uuid PRIMARY KEY,email text);
+    CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT clock_timestamp(),not_after timestamptz);
+    CREATE FUNCTION public.prototype_session_id() RETURNS uuid LANGUAGE sql STABLE AS $$ SELECT nullif(nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'session_id','')::uuid $$;
+    GRANT EXECUTE ON FUNCTION public.prototype_session_id() TO authenticated;`);
+  await pool.query(readFileSync(new URL('../../../supabase/proposals/password-gate/session-authorization.sql', import.meta.url), 'utf8'));
+  const currentReset = (await pool.query('SELECT operation_id FROM public.password_operation_prototype WHERE user_id=$1', [userId])).rows[0].operation_id;
+  const generation = randomUUID(), sessionId = randomUUID(), newReset = randomUUID();
+  await pool.query('SELECT public.prototype_finish_password_reset($1,$2)', [userId, currentReset]);
+  await pool.query('SELECT public.prototype_begin_password_change($1,$2)', [userId, generation]);
+  await pool.query('SELECT public.prototype_finish_password_change($1,$2)', [userId, generation]);
+  await pool.query('INSERT INTO auth.sessions(id,user_id,created_at) VALUES ($1,$2,clock_timestamp())', [sessionId, userId]);
+  const resetClient = await pool.connect(), admitClient = await pool.connect();
+  try {
+    await resetClient.query('BEGIN');
+    await resetClient.query('SET LOCAL ROLE service_role');
+    await resetClient.query('SELECT public.prototype_begin_password_reset($1,$2)', [userId, newReset]);
+    await admitClient.query('BEGIN');
+    await admitClient.query('SET LOCAL ROLE service_role');
+    const pid = (await admitClient.query('SELECT pg_backend_pid() AS pid')).rows[0].pid;
+    const pending = admitClient.query('SELECT public.prototype_admit_verified_session($1,$2,$3)', [userId, sessionId, generation]).then(
+      () => ({ ok: true }), error => ({ ok: false, error }),
+    );
+    await pool.query('SELECT pg_sleep(0.1)');
+    const blocked = await pool.query("SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1", [pid]);
+    assert.equal(blocked.rows[0].wait_event_type, 'Lock');
+    await resetClient.query('COMMIT');
+    const outcome = await pending;
+    assert.equal(outcome.ok, false);
+    assert.match(String(outcome.error), /Password generation changed/);
+    await admitClient.query('ROLLBACK');
+    assert.equal((await pool.query('SELECT count(*)::int AS n FROM public.password_session_authorization_prototype WHERE session_id=$1', [sessionId])).rows[0].n, 0);
+  } finally {
+    await resetClient.query('ROLLBACK').catch(() => {});
+    await admitClient.query('ROLLBACK').catch(() => {});
+    resetClient.release(); admitClient.release();
+  }
+  const nextGeneration = randomUUID(), newSession = randomUUID();
+  await pool.query('SELECT public.prototype_finish_password_reset($1,$2)', [userId, newReset]);
+  await pool.query('SELECT public.prototype_begin_password_change($1,$2)', [userId, nextGeneration]);
+  await pool.query('SELECT public.prototype_finish_password_change($1,$2)', [userId, nextGeneration]);
+  await pool.query('INSERT INTO auth.sessions(id,user_id,created_at) VALUES ($1,$2,clock_timestamp())', [newSession, userId]);
+  await pool.query('SELECT public.prototype_admit_verified_session($1,$2,$3)', [userId, newSession, nextGeneration]);
+  const check = await pool.connect();
+  try {
+    await check.query('BEGIN');
+    await check.query("SELECT set_config('request.jwt.claim.sub',$1,true),set_config('request.jwt.claims',$2,true)", [userId, JSON.stringify({session_id:newSession})]);
+    await check.query('SET LOCAL ROLE authenticated');
+    assert.equal((await check.query('SELECT public.prototype_admitted_session_access_allowed() AS allowed')).rows[0].allowed, true);
+    await check.query('COMMIT');
+    await pool.query('SELECT public.prototype_begin_password_reset($1,$2)', [userId, randomUUID()]);
+    await check.query('BEGIN');
+    await check.query("SELECT set_config('request.jwt.claim.sub',$1,true),set_config('request.jwt.claims',$2,true)", [userId, JSON.stringify({session_id:newSession})]);
+    await check.query('SET LOCAL ROLE authenticated');
+    assert.equal((await check.query('SELECT public.prototype_admitted_session_access_allowed() AS allowed')).rows[0].allowed, false);
+    await check.query('COMMIT');
+  } finally { await check.query('ROLLBACK').catch(() => {}); check.release(); }
+  console.log('PASS: prototype session admission waits behind reset, rejects stale generation, and is invalidated by a later reset (synthetic Auth).');
 } finally {
   if (pool) await pool.end();
   if (databaseCreated) await control.query(`DROP DATABASE ${dbName}`);
