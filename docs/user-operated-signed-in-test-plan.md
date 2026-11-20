@@ -19,7 +19,7 @@ The user reported: administrator Users page **PASS**; support Tickets access **P
 
 ## Phase B — approved synthetic business records
 
-Once explicitly approved, create only marked synthetic records. Test a general user's own ticket and another user's denial; support status/assignment and Type, admin priority/assignment, closing with assignee retained, and maintenance according to approved role rules. Stop on unexpected behavior, failure or ambiguous response; capture a sanitized action, role and error, not credentials or personal data. Do not automatically retry uncertain writes. Test cleanup only under a separate approved plan and retention decision. Current production does not yet contain the prepared ticket or asset RPCs; these checks cannot prove the new code works.
+Once explicitly approved, create only marked synthetic records. Test a general user's own ticket and another user's denial; support status/assignment and Type, admin priority/assignment, closing with assignee retained, and maintenance according to approved role rules. Stop on unexpected behavior, failure or ambiguous response; capture a sanitized action, role and error, not credentials or personal data. Do not automatically retry uncertain writes. Test cleanup only under a separate approved plan and retention decision. The asset-creation RPC was applied to production as `20261120083024`, but the ticket-change RPC is still absent; neither has been verified by real signed-in creation/update tests. The prepared frontend is not deployed.
 
 ## Phase C — separately reviewed migration and frontend deployment only
 

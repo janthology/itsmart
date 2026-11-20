@@ -99,3 +99,5 @@ Public non-internal trigger inventory: asset_history `skip_false_maintenance_una
 ## Subsequent change: first guard migration
 
 After the user approved proceeding without a verified backup, `ticket_and_asset_write_guards` was applied as version `20261119024510`. See `security-remediation-stage-1.md` for post-apply fingerprints, verification limits and rollback. The policy names and cron schedule listed above remained unchanged during post-apply checks; the trigger and function inventory above reflects the earlier baseline, not the new guard.
+
+After separate approval of repository migration `00018`, `create_asset_atomically` was applied as live version `20261120083024`. Postflight and its limitations are recorded in `vercel-preview-readiness.md`; the original inventory above predates both changes. No other migrations or frontend deployments were approved by this action.
