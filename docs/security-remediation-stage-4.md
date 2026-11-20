@@ -1,6 +1,6 @@
 # Transactional audit stream — locally prepared, not deployed
 
-**Later local update:** stage 5 prepares an atomic ticket status/priority/assignment and activity-comment path. It is not deployed; older clients and direct writers still use separate requests. See `security-remediation-stage-5.md`.
+**Later update:** the stage 5 database RPC for atomic ticket status/priority/assignment and activity-comment changes was applied as `20261120133730`; the compatible frontend is not deployed, and older clients and direct writers still use separate requests. See `security-remediation-stage-5.md`.
 
 `20261101000019_transactional_entity_audit.sql` is a **proposed, unapproved production change**. The live migration history differs from repository timestamps; never use a blanket `supabase db push`. This document is not a recoverable backup. No reset or deletion is authorized.
 
