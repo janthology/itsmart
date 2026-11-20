@@ -19,7 +19,9 @@ The user reported: administrator Users page **PASS**; support Tickets access **P
 
 ## Phase B — approved synthetic business records
 
-### Small first batch proposed for separate approval (not yet authorized)
+### Small first batch approved; user execution pending
+
+The user approved the exact two-ticket first batch in conversation. The user operates the dedicated accounts; approval is not evidence that either ticket was created or verified. Cleanup and all broader tests remain separately review-gated.
 
 On the currently deployed ITSMART app connected to the production database, the user would create exactly two tickets: one while signed in as the dedicated general-user test account, and one while signed in as the dedicated support test account. Each title would start `[ITSMART TEST]` and contain only synthetic text, with no attachments or real-person/business information. The accounts can then inspect only these two records in My tickets/All tickets to check current grouping and owner/other-user read visibility. The first batch does not include changes to existing business records, changing status/priority/assignment, comments, ratings, assets, password resets, direct API tests, deletion, or deployment. Ticket IDs/numbers are consumed; records may appear organization-wide and notifications, history or cron side effects can occur. The two records remain in production until a separate cleanup decision and explicit approval. Stop after an ambiguous creation response; don't automatically retry and don't share credentials or personal data. This tests the *currently deployed frontend*, not the prepared ticket RPC or the eventual Vercel preview.
 
