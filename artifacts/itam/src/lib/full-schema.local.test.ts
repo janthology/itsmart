@@ -342,6 +342,16 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     expect((await db.query("SELECT to_regprocedure('public.update_ticket_with_activity(uuid,timestamp with time zone,jsonb,text)') AS fn")).rows).toEqual([{ fn: null }]);
     await db.exec(script('20261101000020_ticket_change_with_activity.sql'));
   });
+  it('revokes service-role default EXECUTE from the ticket RPC without revoking user access', async () => {
+    await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false);");
+    await db.exec('GRANT EXECUTE ON FUNCTION public.update_ticket_with_activity(uuid,timestamptz,jsonb,text) TO service_role');
+    await db.exec(script('20261101000020_ticket_change_with_activity.sql'));
+    const privileges = await db.query("SELECT has_function_privilege('service_role','public.update_ticket_with_activity(uuid,timestamptz,jsonb,text)','EXECUTE') AS service_execute, has_function_privilege('anon','public.update_ticket_with_activity(uuid,timestamptz,jsonb,text)','EXECUTE') AS anon_execute, has_function_privilege('authenticated','public.update_ticket_with_activity(uuid,timestamptz,jsonb,text)','EXECUTE') AS auth_execute");
+    expect(privileges.rows).toEqual([{service_execute:false,anon_execute:false,auth_execute:true}]);
+    await db.exec('SET ROLE service_role');
+    await expect(db.query("SELECT public.update_ticket_with_activity(NULL,NULL,NULL,NULL)")).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE');
+  });
   it('supports owner closure and server-timed hold transitions without widening access', async () => {
     await asUser(admin);
     const ownerTicket = await db.query<{ id: string; updated_at: string }>("INSERT INTO tickets(title,created_by,assigned_to,status,resolved_at) VALUES ('ATOMIC-OWNER',$1,$2,'resolved',now()-interval '1 hour') RETURNING id,updated_at", [general, support]);

@@ -335,7 +335,18 @@ for (const action of ['Status', 'Assignment', 'Priority'] as const) {
         const warning = page.getByRole('alert').filter({ hasText: `${action} update and activity could not be confirmed` });
         await expect(warning).toContainText('both have been saved, or neither');
         if (action === 'Status') await expect(warning).toContainText('Synthetic closure reason');
-        await warning.getByRole('button', { name: 'Dismiss warning' }).click();
+        const stored = await page.evaluate(() => Object.entries(sessionStorage).filter(([key]) => key.startsWith('itsmart:ticket-change-review:v1:')));
+        expect(stored).toHaveLength(1);
+        expect(stored[0][1]).toBe(action);
+        await page.reload();
+        const restored = page.getByRole('alert').filter({ hasText: `${action} update and activity could not be confirmed` });
+        await expect(restored).toBeVisible();
+        await expect(restored).not.toContainText('Synthetic closure reason');
+        // A closed ticket hides the management panel entirely.
+        if (action !== 'Status') await expect(selects.nth(1)).toBeDisabled();
+        await restored.getByRole('button', { name: 'I checked; allow changes' }).click();
+        if (action !== 'Status') await expect(selects.nth(1)).toBeEnabled();
+        expect(await page.evaluate(() => Object.keys(sessionStorage).filter(key => key.startsWith('itsmart:ticket-change-review:v1:')))).toHaveLength(0);
       }
       expect(calls).toHaveLength(1);
       expect(calls[0]).toMatchObject({ p_ticket_id: ticketId, p_expected_updated_at: ticket.updated_at });
@@ -446,6 +457,57 @@ for (const profileFlag of ['confirmed', 'unconfirmed'] as const) {
     if (profileFlag === 'unconfirmed') await expect(page.getByRole('alert').filter({ hasText: 'Password reset needs review' })).toBeVisible();
   });
 }
+
+test('ticket workflow fails closed when review storage cannot be written', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === window.sessionStorage && key.startsWith('itsmart:ticket-change-review:v1:')) throw new Error('Synthetic blocked storage');
+      return original.call(this, key, value);
+    };
+  });
+  let calls = 0;
+  await page.route('**/rest/v1/rpc/update_ticket_with_activity', async route => {
+    if (route.request().method() !== 'OPTIONS') calls++;
+    await route.fulfill({ status: 500, body: 'Unexpected request' });
+  });
+  await page.goto(`/tickets/${ticketId}`);
+  const management = page.locator('div').filter({ has: page.getByText('Ticket management', { exact: true }) }).filter({ has: page.getByText('Update Status', { exact: true }) }).last();
+  const priority = management.getByRole('combobox').nth(1);
+  await priority.click();
+  await page.getByRole('option', { name: 'High - 2', exact: true }).click();
+  await page.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Review information is unavailable' })).toBeVisible();
+  await expect(priority).toBeDisabled();
+  expect(calls).toBe(0);
+});
+
+test('unsent ticket status remarks remain available when review storage fails', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function(key, value) {
+      if (this === window.sessionStorage && key.startsWith('itsmart:ticket-change-review:v1:')) throw new Error('Synthetic blocked storage');
+      return original.call(this, key, value);
+    };
+  });
+  let calls = 0;
+  await page.route('**/rest/v1/rpc/update_ticket_with_activity', async route => {
+    if (route.request().method() !== 'OPTIONS') calls++;
+    await route.fulfill({ status: 500, body: 'Unexpected request' });
+  });
+  await page.goto(`/tickets/${ticketId}`);
+  const management = page.locator('div').filter({ has: page.getByText('Ticket management', { exact: true }) }).filter({ has: page.getByText('Update Status', { exact: true }) }).last();
+  await management.getByRole('combobox').nth(0).click();
+  await page.getByRole('option', { name: 'Closed' }).click();
+  const reason = page.getByPlaceholder(/Reason for closing/);
+  await reason.fill('Keep this unsent synthetic reason');
+  await page.getByRole('button', { name: 'Confirm Close' }).click();
+  await expect(reason).toHaveValue('Keep this unsent synthetic reason');
+  await expect(page.getByRole('button', { name: 'Confirm Close' })).toBeDisabled();
+  expect(calls).toBe(0);
+});
 
 test('report fetch failure displays retry and prevents export until recovered', async ({ page }) => {
   await syntheticSession(page, 'general_user');

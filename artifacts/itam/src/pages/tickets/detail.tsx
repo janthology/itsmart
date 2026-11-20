@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { clearTicketReview, readTicketReview, saveTicketReview, type TicketAction } from "@/lib/ticket-change-review";
 import { TICKET_STATUS_LABEL as STATUS_LABEL, TICKET_PRIORITY_LABEL as PRIORITY_LABEL } from "@/lib/labels";
 import { useRoute, Link } from "wouter";
 import { useGetTicket, useUpdateTicket, useChangeTicketWithActivity, useAddTicketComment, useGetSupportStaff, useGetUsers, useSubmitSatisfactionRating, useGetStaffWorkload, TicketStatus, TicketPriority, TicketType, TICKET_TYPE_LABEL, getResolvedTicketAutoCloseAt, RESOLVED_TICKET_AUTO_CLOSE_DAYS } from "@/lib/supabase-queries";
@@ -119,11 +120,26 @@ export default function TicketDetail() {
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [remarksText, setRemarksText] = useState("");
 
-  // Keep the intended action/remarks on this page when a response is lost:
-  // the transaction may have committed, so do not retry it automatically.
+  // Persist only the action marker before a request. A lost response or page
+  // reload requires review; remarks remain in memory only, not in storage.
   const [pendingPriority, setPendingPriority] = useState<string | null>(null);
-  const [activityWarnings, setActivityWarnings] = useState<{ action: string; remark: string }[]>([]);
-  useEffect(() => setActivityWarnings([]), [id]);
+  const [activityWarning, setActivityWarning] = useState<{ action: TicketAction; remark?: string } | null>(null);
+  const [reviewStorageError, setReviewStorageError] = useState(false);
+  const workflowInFlight = useRef(false);
+  const currentReviewScope = useRef('');
+  currentReviewScope.current = `${user?.id ?? ''}:${id}`;
+  useEffect(() => {
+    if (!user?.id || !id) { setActivityWarning(null); setReviewStorageError(false); return; }
+    try {
+      const prior = readTicketReview(window.sessionStorage, user.id, id);
+      setActivityWarning(prior ? { action: prior } : null);
+      setReviewStorageError(false);
+    } catch {
+      setActivityWarning(null);
+      setReviewStorageError(true);
+    }
+  }, [id, user?.id]);
+  const workflowBlocked = !!activityWarning || reviewStorageError;
 
   const handleStatusSelect = (newStatus: string) => {
     if (REQUIRES_REMARKS.has(newStatus)) {
@@ -134,20 +150,59 @@ export default function TicketDetail() {
     }
   };
 
+  const runWorkflow = async (action: TicketAction, remark: string, changes: { status?: TicketStatus; priority?: TicketPriority; assigned_to?: string | null }, remarks?: string | null): Promise<'success' | 'ambiguous' | 'not_sent'> => {
+    if (workflowInFlight.current) return 'not_sent';
+    if (!user?.id || !id || !ticket?.updatedAt || isError) {
+      toast({ variant: "destructive", title: "Ticket not ready", description: "No update was sent. Refresh the ticket before trying again." });
+      return 'not_sent';
+    }
+    workflowInFlight.current = true;
+    const actor = user.id;
+    const stillCurrent = () => currentReviewScope.current === `${actor}:${id}`;
+    try {
+      try {
+        const prior = readTicketReview(window.sessionStorage, actor, id);
+        if (prior) {
+          setActivityWarning({ action: prior });
+          toast({ variant: "destructive", title: "Review the previous update", description: "Check the refreshed ticket and activity before allowing another change." });
+          return 'not_sent';
+        }
+        // Write before dispatch: a reload during an in-flight request is also ambiguous.
+        saveTicketReview(window.sessionStorage, actor, id, action);
+        setReviewStorageError(false);
+      } catch {
+        setReviewStorageError(true);
+        toast({ variant: "destructive", title: "Cannot save review information", description: "No ticket update was sent. Check browser storage and review any earlier update." });
+        return 'not_sent';
+      }
+      try {
+        await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes, remarks });
+      } catch {
+        if (stillCurrent()) {
+          setActivityWarning({ action, remark });
+          toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
+        }
+        return 'ambiguous';
+      }
+      try {
+        clearTicketReview(window.sessionStorage, actor, id);
+        if (stillCurrent()) { setActivityWarning(null); setReviewStorageError(false); }
+      } catch {
+        // The RPC succeeded, but retain a review warning if the marker cannot be cleared.
+        if (stillCurrent()) { setActivityWarning({ action, remark }); setReviewStorageError(true); }
+      }
+      return stillCurrent() ? 'success' : 'not_sent';
+    } finally {
+      workflowInFlight.current = false;
+    }
+  };
+
   const applyStatusChange = async (newStatus: string, remarks: string | null) => {
     const changes: { status: TicketStatus; assigned_to?: null } = { status: newStatus as TicketStatus };
     if (newStatus === 'open') changes.assigned_to = null;
-    try {
-      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
-      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes, remarks });
-      toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
-    } catch {
-      setActivityWarnings(previous => [...previous, { action: "Status", remark: remarks?.trim() || `Requested status: ${STATUS_LABEL[newStatus] ?? newStatus}` }]);
-      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
-    } finally {
-      setPendingStatus(null);
-      setRemarksText("");
-    }
+    const outcome = await runWorkflow('Status', remarks?.trim() || `Requested status: ${STATUS_LABEL[newStatus] ?? newStatus}`, changes, remarks);
+    if (outcome === 'success') toast({ title: "Status updated", description: `Ticket marked as ${STATUS_LABEL[newStatus]}.` });
+    if (outcome !== 'not_sent') { setPendingStatus(null); setRemarksText(""); }
   };
 
   const handleAssign = async (assigneeId: string | null) => {
@@ -155,13 +210,8 @@ export default function TicketDetail() {
     if (assigneeId && ticket?.status === 'open') changes.status = 'in_progress' as TicketStatus;
     if (!assigneeId && ticket?.status === 'in_progress') changes.status = 'open' as TicketStatus;
     const assigneeName = assigneeId ? assignableStaff.find(s => s.id === assigneeId)?.fullName ?? 'selected user' : 'Unassigned';
-    try {
-      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
-      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes });
+    if (await runWorkflow('Assignment', `Requested assignee: ${assigneeName}`, changes) === 'success') {
       toast({ title: "Ticket assigned", description: assigneeId ? "Assignee updated." : "Assignee removed." });
-    } catch {
-      setActivityWarnings(previous => [...previous, { action: "Assignment", remark: `Requested assignee: ${assigneeName}` }]);
-      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
     }
   };
 
@@ -169,13 +219,8 @@ export default function TicketDetail() {
     if (!pendingPriority) return;
     const newPriority = pendingPriority;
     setPendingPriority(null);
-    try {
-      if (!ticket?.updatedAt) throw new Error('Ticket version unavailable');
-      await workflowMutation.mutateAsync({ id, expectedUpdatedAt: ticket.updatedAt, changes: { priority: newPriority as TicketPriority } });
+    if (await runWorkflow('Priority', `Requested priority: ${PRIORITY_LABEL[newPriority] ?? newPriority}`, { priority: newPriority as TicketPriority }) === 'success') {
       toast({ title: "Priority updated", description: `Priority set to ${PRIORITY_LABEL[newPriority]}.` });
-    } catch {
-      setActivityWarnings(previous => [...previous, { action: "Priority", remark: `Requested priority: ${PRIORITY_LABEL[newPriority] ?? newPriority}` }]);
-      toast({ variant: "destructive", title: "Update not confirmed", description: "Check the refreshed ticket and activity before retrying." });
     }
   };
 
@@ -334,14 +379,26 @@ export default function TicketDetail() {
           </div>
         )}
 
-        {activityWarnings.map((warning, index) => (
-          <div key={index} role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
-            <p className="font-semibold">{warning.action} update and activity could not be confirmed.</p>
-            <p className="mt-1">They may both have been saved, or neither may have been saved. Check the refreshed ticket and activity before retrying. Keep the text below before leaving; this warning is not saved.</p>
-            <p className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2">{warning.remark}</p>
-            <Button variant="outline" size="sm" className="mt-2" onClick={() => setActivityWarnings(previous => previous.filter((_, i) => i !== index))}>Dismiss warning</Button>
+        {workflowBlocked && (
+          <div role="alert" className="rounded-xl border border-amber-500/50 bg-amber-50 p-4 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+            <p className="font-semibold">{activityWarning ? `${activityWarning.action} update and activity could not be confirmed.` : 'Ticket update needs review.'}</p>
+            <p className="mt-1">They may both have been saved, or neither may have been saved. Check the refreshed ticket and activity before allowing another change.</p>
+            <p className="mt-1">The warning is kept only in this browser tab. Closing the tab, clearing browser storage, or using another tab or device can lose it. Remarks are not saved here.</p>
+            {activityWarning?.remark && <p className="mt-2 whitespace-pre-wrap break-words rounded-md bg-background/70 p-2">{activityWarning.remark}</p>}
+            {reviewStorageError && <p className="mt-1">Review information is unavailable. Ticket changes are blocked until browser storage is available and the previous result is reviewed.</p>}
+            <Button variant="outline" size="sm" className="mt-2" disabled={ticketBusy || isError} onClick={() => {
+              if (!user?.id || !id) return;
+              try {
+                clearTicketReview(window.sessionStorage, user.id, id);
+                setActivityWarning(null);
+                setReviewStorageError(false);
+              } catch {
+                setReviewStorageError(true);
+                toast({ variant: "destructive", title: "Could not clear review information", description: "Check browser storage before allowing another change." });
+              }
+            }}>I checked; allow changes</Button>
           </div>
-        ))}
+        )}
 
         {/* Priority Confirmation Dialog */}
         <Dialog open={!!pendingPriority} onOpenChange={(open) => { if (!open) setPendingPriority(null); }}>
@@ -395,7 +452,7 @@ export default function TicketDetail() {
               </Button>
               <Button
                 className={`rounded-xl ${isClosing ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' : ''}`}
-                disabled={!remarksText.trim() || ticketBusy || commentMutation.isPending}
+                disabled={!remarksText.trim() || ticketBusy || commentMutation.isPending || workflowBlocked || isError}
                 onClick={() => applyStatusChange(pendingStatus!, remarksText)}
               >
                 {(ticketBusy || commentMutation.isPending) && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
@@ -731,7 +788,7 @@ export default function TicketDetail() {
                         <Select
                           value={ticket.status}
                           onValueChange={handleStatusSelect}
-                          disabled={ticketBusy || getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).length === 0}
+                          disabled={ticketBusy || workflowBlocked || isError || getAllowedTransitions(ticket.status, (user?.role ?? 'general_user') as Role).length === 0}
                         >
                           <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                           <SelectContent>
@@ -751,7 +808,7 @@ export default function TicketDetail() {
                           <Select
                             value={ticket.priority}
                             onValueChange={(val) => { if (val !== ticket.priority) setPendingPriority(val); }}
-                            disabled={ticketBusy}
+                            disabled={ticketBusy || workflowBlocked || isError}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                             <SelectContent>
@@ -797,7 +854,7 @@ export default function TicketDetail() {
                           <Select
                             value={ticket.assignedTo?.id ?? "unassigned"}
                             onValueChange={(v) => handleAssign(v === "unassigned" ? null : v)}
-                            disabled={ticketBusy || ticket.status === "resolved"}
+                            disabled={ticketBusy || workflowBlocked || isError || ticket.status === "resolved"}
                           >
                             <SelectTrigger className="w-full rounded-xl"><SelectValue placeholder="Unassigned" /></SelectTrigger>
                             <SelectContent>
@@ -831,7 +888,7 @@ export default function TicketDetail() {
                             <Button
                               variant="outline"
                               className="mt-2 w-full rounded-xl"
-                              disabled={ticketBusy}
+                              disabled={ticketBusy || workflowBlocked || isError}
                               onClick={() => handleAssign(user!.id)}
                             >
                               {ticketBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <UserCheck className="w-4 h-4 mr-2" />}

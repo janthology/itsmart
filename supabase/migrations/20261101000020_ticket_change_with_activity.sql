@@ -88,5 +88,7 @@ BEGIN
     VALUES (p_ticket_id,actor,false,comment_body);
   RETURN p_ticket_id;
 END $$;
-REVOKE ALL ON FUNCTION public.update_ticket_with_activity(uuid,timestamptz,jsonb,text) FROM PUBLIC, anon;
+-- Supabase public-schema defaults can explicitly grant service_role EXECUTE.
+-- This invoker RPC is for authenticated users, not privileged service calls.
+REVOKE ALL ON FUNCTION public.update_ticket_with_activity(uuid,timestamptz,jsonb,text) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.update_ticket_with_activity(uuid,timestamptz,jsonb,text) TO authenticated;
