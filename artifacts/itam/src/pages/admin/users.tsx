@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, UserPlus, Users, X, KeyRound, Copy, Check } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { Redirect } from "wouter";
+import { Link, Redirect } from "wouter";
 import { supabase } from "@/lib/supabase";
 import { logAdminAction } from "@/lib/audit";
 import { PaginationBar } from "@/components/ui/pagination-bar";
@@ -258,6 +258,7 @@ export default function UsersManagement() {
             </>
           }
         >
+          <Button asChild variant="outline" className="h-10 rounded-xl"><Link href="/admin/audit">Audit log</Link></Button>
           <Button className="h-10 shrink-0 rounded-xl shadow-sm" onClick={() => setAddUserOpen(true)}>
             <UserPlus className="w-4 h-4 mr-1.5" /> Add user
           </Button>

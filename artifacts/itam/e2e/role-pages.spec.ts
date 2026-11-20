@@ -85,6 +85,53 @@ for (const role of ['administrator', 'support_staff', 'general_user'] as const) 
   });
 }
 
+for (const role of ['support_staff', 'general_user'] as const) {
+  test(`${role}: audit page redirects without requesting audit records`, async ({ page }) => {
+    await syntheticSession(page, role);
+    let calls = 0;
+    await page.route('**/rest/v1/entity_change_audit*', async route => { calls++; await route.abort(); });
+    await page.goto('/admin/audit');
+    await expect(page).toHaveURL(/\/dashboard$/);
+    expect(calls).toBe(0);
+  });
+}
+
+test('admin audit viewer loads metadata first, then sensitive details on request', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  const selects: string[] = [];
+  const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, OPTIONS' };
+  await page.route('**/rest/v1/entity_change_audit*', async route => {
+    if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
+    const params = new URL(route.request().url()).searchParams;
+    const select = params.get('select') ?? '';
+    selects.push(select);
+    const data = select.includes('old_values') ? [{ old_values: { title: '<img src=x onerror=alert(1)>' }, new_values: { title: 'Changed' } }]
+      : params.has('id') ? [] : Array.from({ length: 26 }, (_, index) => ({ id: String(100 - index), occurred_at: '2026-01-01T00:00:00Z', entity_type: 'ticket', entity_id: ticketId, operation: 'UPDATE', actor_id: null }));
+    return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(data) });
+  });
+  await page.goto('/admin/audit');
+  await expect(page.getByRole('heading', { name: /Audit log/i })).toBeVisible();
+  await expect(page.getByText('Event 100', { exact: false })).toBeVisible();
+  expect(selects).toHaveLength(1);
+  expect(selects[0]).not.toContain('old_values');
+  await page.getByRole('button', { name: 'View details' }).first().click();
+  await expect(page.getByText('<img src=x onerror=alert(1)>', { exact: false })).toBeVisible();
+  expect(selects.some(select => select.includes('old_values'))).toBe(true);
+  await expect(page.locator('pre img')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Older' }).click();
+  await expect(page.getByText('No audit events on this page')).toBeVisible();
+  await page.getByRole('button', { name: 'Previous' }).click();
+  await expect(page.getByText('Event 100', { exact: false })).toBeVisible();
+});
+
+test('audit viewer reports a missing stream instead of an empty list', async ({ page }) => {
+  await syntheticSession(page, 'administrator');
+  await page.route('**/rest/v1/entity_change_audit*', async route => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ message: 'Synthetic missing audit table' }), headers: { 'access-control-allow-origin': '*' } }));
+  await page.goto('/admin/audit');
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not load audit events' })).toBeVisible();
+  await expect(page.getByText('No audit events on this page')).toHaveCount(0);
+});
+
 test('AUDIT: password inputs have programmatically associated labels', async ({ page }) => {
   await syntheticSession(page, 'general_user');
   await page.goto('/change-password');

@@ -19,6 +19,12 @@ The user reported: administrator Users page **PASS**; support Tickets access **P
 
 ## Phase B — approved synthetic business records
 
+### Small first batch proposed for separate approval (not yet authorized)
+
+On the currently deployed ITSMART app connected to the production database, the user would create exactly two tickets: one while signed in as the dedicated general-user test account, and one while signed in as the dedicated support test account. Each title would start `[ITSMART TEST]` and contain only synthetic text, with no attachments or real-person/business information. The accounts can then inspect only these two records in My tickets/All tickets to check current grouping and owner/other-user read visibility. The first batch does not include changes to existing business records, changing status/priority/assignment, comments, ratings, assets, password resets, direct API tests, deletion, or deployment. Ticket IDs/numbers are consumed; records may appear organization-wide and notifications, history or cron side effects can occur. The two records remain in production until a separate cleanup decision and explicit approval. Stop after an ambiguous creation response; don't automatically retry and don't share credentials or personal data. This tests the *currently deployed frontend*, not the prepared ticket RPC or the eventual Vercel preview.
+
+### Broader batch after its own review
+
 Once explicitly approved, create only marked synthetic records. Test a general user's own ticket and another user's denial; support status/assignment and Type, admin priority/assignment, closing with assignee retained, and maintenance according to approved role rules. Stop on unexpected behavior, failure or ambiguous response; capture a sanitized action, role and error, not credentials or personal data. Do not automatically retry uncertain writes. Test cleanup only under a separate approved plan and retention decision. The asset-creation RPC was applied to production as `20261120083024` and the ticket-change RPC as `20261120133730`; neither has been verified by real signed-in creation/update tests. The prepared frontend is not deployed.
 
 ## Phase C — separately reviewed migration and frontend deployment only

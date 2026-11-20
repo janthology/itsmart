@@ -20,6 +20,7 @@ const AssetDetail = lazy(() => import("./pages/assets/detail"));
 const TicketsList = lazy(() => import("./pages/tickets/index"));
 const TicketDetail = lazy(() => import("./pages/tickets/detail"));
 const UsersManagement = lazy(() => import("./pages/admin/users"));
+const AuditLog = lazy(() => import("./pages/admin/audit"));
 const Profile = lazy(() => import("./pages/profile"));
 const Reports = lazy(() => import("./pages/reports"));
 const ChangePassword = lazy(() => import("./pages/change-password"));
@@ -82,6 +83,7 @@ function Router() {
       <Route path="/tickets">{() => <ProtectedRoute component={TicketsList} />}</Route>
       <Route path="/tickets/:id">{() => <ProtectedRoute component={TicketDetail} />}</Route>
       <Route path="/admin/users">{() => <ProtectedRoute component={UsersManagement} />}</Route>
+      <Route path="/admin/audit">{() => <ProtectedRoute component={AuditLog} />}</Route>
       <Route path="/reports">{() => <ProtectedRoute component={Reports} />}</Route>
       <Route path="/profile">{() => <ProtectedRoute component={Profile} />}</Route>
       <Route path="/change-password">{() => <ProtectedRoute component={ChangePassword} />}</Route>
