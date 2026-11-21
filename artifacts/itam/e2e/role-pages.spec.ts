@@ -269,55 +269,6 @@ test('mobile layout audit: common pages fit a 390px viewport', async ({ page }) 
   }
 });
 
-for (const failure of ['403', 'no-row'] as const) {
-  test(`password update recovers from profile update ${failure} without changing password twice`, async ({ page }) => {
-    await syntheticSession(page, 'general_user', true);
-    const profile = profiles[2];
-    const user = { id: profile.id, email: profile.email, created_at: profile.created_at, app_metadata: { role: profile.role }, user_metadata: { full_name: profile.full_name }, aud: 'authenticated', role: 'authenticated' };
-    const token = `eyJhbGciOiJub25lIn0.${Buffer.from(JSON.stringify({ sub: user.id, exp: 4102444800 })).toString('base64url')}.signature`;
-    const session = { access_token: token, refresh_token: 'fake-refresh', expires_in: 3600, expires_at: 4102444800, token_type: 'bearer', user };
-    const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'GET, POST, PUT, PATCH, OPTIONS' };
-    let authUpdates = 0;
-    let profileUpdates = 0;
-    const profilePayloads: { must_change_password: boolean; password_changed_at: string }[] = [];
-    await page.route('**/auth/v1/token*', async route => {
-      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-      return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(session) });
-    });
-    await page.route('**/auth/v1/user', async route => {
-      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-      if (route.request().method() === 'PUT') { authUpdates++; return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify(user) }); }
-      return route.fallback();
-    });
-    await page.route('**/rest/v1/profiles*', async route => {
-      if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 204, headers });
-      if (route.request().method() === 'PATCH') {
-        profileUpdates++;
-        profilePayloads.push(route.request().postDataJSON());
-        if (profileUpdates === 1) return route.fulfill({ status: failure === '403' ? 403 : 200, headers, contentType: 'application/json', body: JSON.stringify(failure === '403' ? { message: 'Synthetic profile update failed' } : []) });
-        return route.fulfill({ status: 200, headers, contentType: 'application/json', body: JSON.stringify([{ id: profile.id }]) });
-      }
-      return route.fallback();
-    });
-    await page.goto('/dashboard');
-    await expect(page).toHaveURL(/\/change-password$/);
-    await page.getByLabel('Current Password', { exact: true }).fill('OldPassword1!');
-    await page.getByLabel('New Password', { exact: true }).fill('NewPassword2!');
-    await page.getByLabel('Confirm New Password', { exact: true }).fill('NewPassword2!');
-    await page.getByRole('button', { name: 'Change Password' }).click();
-    await expect(page.getByRole('alert')).toContainText('Your new password is active');
-    await expect(page).toHaveURL(/\/change-password$/);
-    await expect(page.getByLabel('Current Password', { exact: true })).toHaveCount(0);
-    expect(authUpdates).toBe(1);
-    await page.getByRole('button', { name: 'Retry account update' }).click();
-    await expect(page).toHaveURL(/\/dashboard$/);
-    expect(profileUpdates).toBe(2);
-    expect(profilePayloads[0].must_change_password).toBe(false);
-    expect(profilePayloads[1]).toEqual(profilePayloads[0]);
-    expect(authUpdates).toBe(1);
-  });
-}
-
 
 test('asset creation retries the same atomic request and blocks changed details until review', async ({ page }) => {
   await syntheticSession(page, 'administrator');

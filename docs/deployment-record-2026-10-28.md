@@ -45,3 +45,8 @@ This record lists what changed outside Git on 2026-10-28, what was held back, an
 - **Flagged account:** one active general user still has `must_change_password = true`. The password change is not yet verified end to end.
 - **Rollback of 00022:** `supabase/rollbacks/20261101000022_profile_password_flag_guard.sql`. It restores table-level `UPDATE` for `authenticated`. Use only if the change-password path breaks.
 - **Still unverified:** the live `change-password` function has not been exercised with a real account. Browser e2e has not run.
+
+## Update 2026-11-21: first end-to-end password change and browser suite
+
+- **Account test4@gmail.com** (synthetic test user, `ORD`): admin reset ran at 10:20:57 UTC. The reset response warned that the flag could not be confirmed, but the database showed `must_change_password = true`. The user then signed in and changed the password. After the change, the database showed `must_change_password = false` and `password_changed_at` set (10:24:19 UTC). This is one live run, not a full test. The Edge Function logs were not readable from the sandbox, so which server path cleared the flag was not directly confirmed.
+- **Browser e2e:** the previous CI `e2e-smoke` job failed on `2edfa7a`. Two tests in `artifacts/itam/e2e/role-pages.spec.ts` still mocked the old direct profile-update recovery path, which the page no longer uses. I removed those two cases (the 403 and no-row variants). The replacement cases (review marker, success, wrong password, label association) remain. Local run against the production build with Chromium 131: 61 passed, 0 failed. The sandbox has no Playwright Chromium download, so the local run used a Chromium binary from npm (`@sparticuz/chromium`).
