@@ -63,3 +63,13 @@ This section supersedes the "Held back" and "Known gaps" text above, which descr
 - **Browser e2e:** runs in GitHub CI `e2e-smoke`. The run on `672b813` passed (run `44897902791`). The earlier "has not run" statements are superseded.
 - **Flagged account:** `test4@gmail.com` was cleared by the first live password change on 2026-11-21. A read-only check now shows 0 of 15 profiles flagged and 13 active. The earlier flagged-count figures in the notes are not reliable for the pre-reset state. The "one active general user still has the flag" line in the 2026-11-21 update is superseded.
 - **Still unverified:** a second live password change on a different account; the production Vercel deployment behind SSO; which server path cleared the flag on `test4@gmail.com`.
+
+## Read-only check 2026-11-21: live Edge Function source versus repo
+
+Read with `get_edge_function` on `rkwxdqludtdzbpuftsvi`. Nothing was deployed or changed.
+
+- **`reset-password` live v4** (updated 1793354091559): sets the password first, then the profile flag, then makes a best-effort session-delete call. It has no self-reset guard, and it returns a 500 if the flag write fails after the password change. **Does not match the repo.** The repo version (`supabase/functions/reset-password/index.ts`) sets and confirms the flag before touching Auth, refuses self-reset, returns `profileFlag` and `sessionRevocation: "unverified"`, and reports `reset_unconfirmed`.
+- **`create-user` live v3** (updated 1793354108362): creates the Auth user, writes the profile, and deletes the Auth user on profile failure. It has no profile confirmation and no cleanup-unconfirmed handling. **Does not match the repo.** The repo version confirms the profile and reports `creation_unconfirmed`, `cleanup_requested` and `cleanup_unconfirmed`.
+- **`change-password`**: live v1 matches the committed source (checked earlier).
+
+Consequence: the live `reset-password` and `create-user` are older than the repo code. Deploying the repo versions is a separate approval, after tests. Do not treat the repo as deployed. See `docs/pilot-data-wipe-plan.md`, section 8.
