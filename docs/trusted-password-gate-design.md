@@ -45,3 +45,13 @@ Synthetic tests demonstrate that a late-created session would pass the **older t
 An experimental opt-in frontend integration was explored locally, but a mocked browser login-success test did not pass and the work was removed from the deployable frontend. Successful mocked tests of some other paths did not establish real security. The current frontend still uses the legacy, bypassable profile flag. Do not enable or deploy the proposals; completing the system requires the real integration and security coverage listed above.
 
 The prior password-change Edge prototype also creates a temporary session for re-verification; cleanup, GoTrue endpoint semantics, error paths, service-key usage and ambiguous outcomes remain unresolved. A trusted state cannot safely be completed merely by accepting a client assertion. The current profile flow is unchanged and insecure as a trusted gate. Do not apply or deploy these proposals.
+
+## Read-only production verification (2026-10-28)
+
+A read-only catalog check of the live `profiles` table found that the current mandatory-password flag is client-editable:
+
+- The `profiles_update_self_or_admin` policy allows an active user to update their own row, and the `authenticated` role holds column UPDATE grants on `must_change_password` and `password_changed_at`.
+- The `guard_profile_update` trigger rejects a non-administrator changing their own `role` or `is_active`, but it does not restrict `must_change_password` or `password_changed_at`. A signed-in user can therefore clear their own required-password-change flag through the Data API directly.
+- Clearing the flag only affects the app prompt. No table or RPC currently checks it, so the trusted gate remains unimplemented.
+
+No writes, migrations, or Edge Function or frontend deployments were made for this check. The fix needs a reviewed plan that covers a privileged completion RPC, the restricted session path, existing-account initialization, and rollback before any production change.
