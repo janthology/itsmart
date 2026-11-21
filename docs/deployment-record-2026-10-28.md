@@ -34,3 +34,14 @@ This record lists what changed outside Git on 2026-10-28, what was held back, an
 - `vitest run`: 29 files, 240 tests passing. Includes `change-password-edge.test.ts` (25) and `profile-password-flag-guard.local.test.ts` (6).
 - `tsc --noEmit -p .`: exit 0.
 - `vite build`: exit 0.
+
+## Update 2026-11-21: migration 00022 applied
+
+- **Live migration:** applied to `DOST02-ITSMART` as `20261121090050 profile_password_flag_guard`. The SQL matches `supabase/migrations/20261101000022_profile_password_flag_guard.sql` at commit `15154ff`, except that the explanatory header comments were shortened. No SQL statement changed.
+- **Trigger:** `guard_profile_password_flags` is `SECURITY INVOKER`. Its `trg_guard_profile_password_flags` trigger is enabled. The earlier `SECURITY DEFINER` version was a no-op (see `15154ff`).
+- **Grants:** `authenticated` no longer has table-level `UPDATE` on `profiles`. Column grants are `role`, `full_name`, `department`, and `is_active`.
+- **Probe:** a rollback-only probe as `authenticated` showed a direct write to `must_change_password` is blocked, and an own-name update is allowed. The probe always raised, so nothing was committed.
+- **Frontend:** production is `dpl_783iuKSmLzHcxzyf7XmMJA1KEima`, built from `15154ff`, promoted over the previous `dpl_F4exUtaVQX8WdTidmW93jC8DWMcw`. Rollback of the frontend is redeploying `dpl_F4exUtaVQX8WdTidmW93jC8DWMcw` to production.
+- **Flagged account:** one active general user still has `must_change_password = true`. The password change is not yet verified end to end.
+- **Rollback of 00022:** `supabase/rollbacks/20261101000022_profile_password_flag_guard.sql`. It restores table-level `UPDATE` for `authenticated`. Use only if the change-password path breaks.
+- **Still unverified:** the live `change-password` function has not been exercised with a real account. Browser e2e has not run.
