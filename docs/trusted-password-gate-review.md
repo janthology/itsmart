@@ -56,3 +56,12 @@ The design lists what must be proven against hosted Auth: whether an admin passw
 1. Confirm the scope in Phase 0: all business data (recommended by the design) or writes only.
 2. Name the dedicated test accounts for Phase 2 signed-in tests. Do not use the retained administrator for tests.
 3. Approve Phase 0 and the Phase 1 design review. Phases 1 to 4 each need separate approval; they cannot be done in one step.
+
+## Phase 0 decisions (recorded 2026-11-21)
+
+- **Scope:** the gate covers **all business data**, as the design recommends. Writes-only was rejected, because flagged sessions could still read tickets, assets and profiles directly.
+- **Phase 0 approved** by the user. This records decisions only. No production change was made, and no Phase 1 work has started.
+- **Phase 1** (non-enforcing migration) needs its own design review and approval. Phases 2 to 4 each need separate approval.
+- **Still open for Phase 2:** the dedicated test accounts. Do not use the retained administrator. The user-operated plan (`docs/user-operated-signed-in-test-plan.md`) lists three dedicated accounts; confirm they are the ones to use.
+- **Not implemented:** the gate itself. Until Phase 3, the flag is enforced only in the app.
+
