@@ -61,5 +61,5 @@ This section supersedes the "Held back" and "Known gaps" text above, which descr
 - **Edge Function `change-password`:** ACTIVE, version 1, `verify_jwt` false. Still in use by production.
 - **`create-user` (v3) and `reset-password` (v4):** not modified. The repo-to-live match is still unverified.
 - **Browser e2e:** runs in GitHub CI `e2e-smoke`. The run on `672b813` passed (run `44897902791`). The earlier "has not run" statements are superseded.
-- **Flagged account:** `test4@gmail.com` was cleared by the first live password change on 2026-11-21. No other account was known to be flagged at the last read-only check (1 flagged before the reset, 0 after the change). The "one active general user still has the flag" line in the 2026-11-21 update is superseded.
+- **Flagged account:** `test4@gmail.com` was cleared by the first live password change on 2026-11-21. A read-only check now shows 0 of 15 profiles flagged and 13 active. The earlier flagged-count figures in the notes are not reliable for the pre-reset state. The "one active general user still has the flag" line in the 2026-11-21 update is superseded.
 - **Still unverified:** a second live password change on a different account; the production Vercel deployment behind SSO; which server path cleared the flag on `test4@gmail.com`.
