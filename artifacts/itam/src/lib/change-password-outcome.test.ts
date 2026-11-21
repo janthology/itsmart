@@ -18,6 +18,12 @@ describe('classifyChangePasswordResponse', () => {
     if (outcome.kind === 'rejected') expect(outcome.message.length).toBeGreaterThan(0);
   });
 
+  it('treats a gate refusal as a rejection with nothing changed, and an unconfirmed lock as ambiguous', () => {
+    expect(classifyChangePasswordResponse(403, 'change_unavailable')).toEqual({ kind: 'rejected', message: 'This password change cannot be started. Nothing was changed. Contact an administrator.' });
+    expect(classifyChangePasswordResponse(503, 'operation_unconfirmed').kind).toBe('ambiguous');
+    expect(classifyChangePasswordResponse(503, 'completion_unconfirmed').kind).toBe('ambiguous');
+  });
+
   it('sends a 401 to sign-in', () => {
     expect(classifyChangePasswordResponse(401, 'authentication_required')).toEqual({ kind: 'session_ended' });
   });

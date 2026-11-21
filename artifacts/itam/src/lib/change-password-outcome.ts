@@ -15,6 +15,7 @@ const REJECTED_MESSAGES: Record<string, string> = {
   same_password: 'Choose a password different from your current password.',
   invalid_input: 'Check the password fields and try again.',
   account_unavailable: 'This account is not available for a password change. Contact an administrator.',
+  change_unavailable: 'This password change cannot be started. Nothing was changed. Contact an administrator.',
   unsupported_account: 'This account is not available for a password change. Contact an administrator.',
   verification_unavailable: 'The password could not be checked right now. Nothing was changed. Try again shortly.',
   request_unconfirmed: 'The request could not be completed. Nothing was changed. Try again shortly.',

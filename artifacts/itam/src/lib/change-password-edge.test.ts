@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
+import { webcrypto } from 'node:crypto';
 import ts from 'typescript';
 
 // Runs the real change-password Edge Function source with every Auth and REST
@@ -19,7 +20,7 @@ function loadFunction(fetch: typeof globalThis.fetch): Handler {
   const env: Record<string, string> = { SUPABASE_URL: 'https://synthetic.invalid', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-key' };
   runInNewContext(script, {
     Deno: { serve: (fn: Handler) => { handler = fn; }, env: { get: (key: string) => env[key] } },
-    fetch, Request, Response, URL, JSON, Date, console,
+    fetch, Request, Response, URL, JSON, Date, console, crypto: webcrypto,
   });
   if (!handler) throw new Error('Function did not register a handler');
   return handler;
@@ -40,6 +41,7 @@ interface Steps {
   put?: Response | Error;
   logout?: Response | Error;
   patch?: Response | Error;
+  rpc?: Partial<Record<'password_gate_begin_change' | 'password_gate_cancel_unattempted_change' | 'password_gate_finish_change', Response | Error>>;
 }
 // Routes each mocked call by URL and method, recording order and bodies.
 function setup(steps: Steps = {}) {
@@ -58,6 +60,10 @@ function setup(steps: Steps = {}) {
     if (url.endsWith('/auth/v1/user') && method === 'PUT') return pick(steps.put, () => json({ id: userId }));
     if (url.includes('/auth/v1/logout')) return pick(steps.logout, () => new Response(null, { status: 204 }));
     if (url.includes('/rest/v1/profiles') && method === 'PATCH') return pick(steps.patch, () => json([{ id: userId, must_change_password: false }]));
+    if (url.includes('/rest/v1/rpc/password_gate_') && method === 'POST') {
+      const name = url.split('/rest/v1/rpc/')[1] as keyof NonNullable<Steps['rpc']>;
+      return pick(steps.rpc?.[name], () => new Response(null, { status: 204 }));
+    }
     throw new Error(`unexpected request ${method} ${url}`);
   });
   return { fetch, calls, handler: loadFunction(fetch as unknown as typeof globalThis.fetch) };
@@ -171,9 +177,11 @@ describe('change-password Edge Function: success path', () => {
     expect(methods(calls)).toEqual([
       'GET /auth/v1/user',
       'GET /rest/v1/profiles?select=id%2Cis_active%2Cmust_change_password&id=eq.' + userId,
+      'POST /rest/v1/rpc/password_gate_begin_change',
       'POST /auth/v1/token?grant_type=password',
       'PUT /auth/v1/user',
       'POST /auth/v1/logout?scope=global',
+      'POST /rest/v1/rpc/password_gate_finish_change',
       'PATCH /rest/v1/profiles?select=id%2Cmust_change_password&id=eq.' + userId + '&is_active=eq.true',
     ]);
   });
@@ -213,3 +221,79 @@ describe('change-password Edge Function: success path', () => {
     expect(text).not.toContain(verifyToken);
   });
 });
+
+describe('change-password Edge Function: password gate (Phase 2)', () => {
+  const gateCalls = (calls: Array<{ url: string }>) => calls.map(c => c.url).filter(u => u.includes('/rpc/password_gate_')).map(u => u.split('/rpc/')[1]);
+  const unflagged = json([{ id: userId, is_active: true, must_change_password: false }]);
+
+  it('takes the gate lock before verifying the current password', async () => {
+    const { handler, calls } = setup();
+    await handler(post(valid));
+    const order = methods(calls);
+    expect(order.indexOf('POST /rest/v1/rpc/password_gate_begin_change')).toBeLessThan(order.findIndex(m => m.includes('grant_type=password')));
+  });
+  it('refuses a flagged account whose gate lock is unavailable, without verifying or changing anything', async () => {
+    const { handler, calls } = setup({ rpc: { password_gate_begin_change: json({ message: 'Password change not available' }, 400) } });
+    const response = await handler(post(valid));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({ code: 'change_unavailable' });
+    expect(calls.some(c => c.url.includes('grant_type=password') || c.method === 'PUT')).toBe(false);
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change']);
+  });
+  it('lets an unflagged account continue on the existing path when no gate lock is available', async () => {
+    const { handler, calls } = setup({ profile: unflagged, rpc: { password_gate_begin_change: json({ message: 'Password change not available' }, 400) } });
+    const response = await handler(post(valid));
+    expect(response.status).toBe(200);
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change']);
+  });
+  it('stops with no Auth action when the lock response is lost, and does not release the lock', async () => {
+    const { handler, calls } = setup({ rpc: { password_gate_begin_change: new Error('network failure') } });
+    const response = await handler(post(valid));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: 'operation_unconfirmed' });
+    expect(calls.some(c => c.url.includes('grant_type=password') || c.method === 'PUT')).toBe(false);
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change']);
+  });
+  it('releases the lock after a wrong current password, before any Auth change', async () => {
+    const { handler, calls } = setup({ token: json({ error: 'invalid_grant' }, 400) });
+    const response = await handler(post(valid));
+    expect(await response.json()).toEqual({ code: 'verification_failed' });
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change', 'password_gate_cancel_unattempted_change']);
+    expect(calls.some(c => c.method === 'PUT')).toBe(false);
+  });
+  it('releases the lock after a verification outage, before any Auth change', async () => {
+    const { handler, calls } = setup({ token: new Error('network down') });
+    expect(await (await handler(post(valid))).json()).toEqual({ code: 'verification_unavailable' });
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change', 'password_gate_cancel_unattempted_change']);
+  });
+  it('keeps the lock held and reports unconfirmed when release fails after a wrong password', async () => {
+    const { handler, calls } = setup({ token: json({ error: 'invalid_grant' }, 400), rpc: { password_gate_cancel_unattempted_change: json({}, 500) } });
+    expect(await (await handler(post(valid))).json()).toEqual({ code: 'operation_unconfirmed' });
+    expect(calls.some(c => c.method === 'PUT')).toBe(false);
+  });
+  it('never releases the lock after the Auth password change has started', async () => {
+    const { handler, calls } = setup({ put: json({}, 500) });
+    expect(await (await handler(post(valid))).json()).toEqual({ code: 'change_unconfirmed' });
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change']);
+  });
+  it('completes the gate only after revocation, and before clearing the flag', async () => {
+    const { handler, calls } = setup();
+    await handler(post(valid));
+    const order = methods(calls);
+    const finish = order.indexOf('POST /rest/v1/rpc/password_gate_finish_change');
+    expect(finish).toBeGreaterThan(order.findIndex(m => m.includes('/logout')));
+    expect(finish).toBeLessThan(order.findIndex(m => m.startsWith('PATCH')));
+  });
+  it('keeps the flag set and reports unconfirmed when the gate completion fails', async () => {
+    const { handler, calls } = setup({ rpc: { password_gate_finish_change: json({ message: 'Password operation mismatch' }, 400) } });
+    expect(await (await handler(post(valid))).json()).toEqual({ code: 'completion_unconfirmed' });
+    expect(calls.some(c => c.method === 'PATCH')).toBe(false);
+    expect(calls.filter(c => c.method === 'PUT')).toHaveLength(1);
+  });
+  it('does not release the lock after a lost revocation response', async () => {
+    const { handler, calls } = setup({ logout: json({}, 500) });
+    expect(await (await handler(post(valid))).json()).toEqual({ code: 'revocation_unconfirmed' });
+    expect(gateCalls(calls)).toEqual(['password_gate_begin_change']);
+  });
+});
+

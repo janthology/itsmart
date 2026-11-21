@@ -195,7 +195,9 @@ export default function UsersManagement() {
         }
         flagWarning(result.code === "profile_unconfirmed"
           ? "The account flag could not be confirmed. The new function did not attempt the password reset; check the profile before retrying."
-          : "The reset could not be confirmed. The password may have changed and the account flag may be set. Check the account before retrying.");
+          : result.code === "reset_unavailable"
+            ? "A password operation is already in progress for this account. Nothing was changed. Do not retry until it is resolved."
+            : "The reset could not be confirmed. The password may have changed and the account may now be locked for password operations. Check the account before retrying.");
         return;
       }
       if (typeof result.temporaryPassword !== "string" || !result.temporaryPassword) {
@@ -208,6 +210,9 @@ export default function UsersManagement() {
       setTempPasswordInfo({ name, password: result.temporaryPassword, action: "reset", profileFlagUnconfirmed: result.profileFlag !== "confirmed" });
       if (result.profileFlag !== "confirmed") {
         flagWarning("The password was reset, but the password-change flag could not be confirmed. Check the account profile before allowing use.");
+      }
+      if (result.gateConfirmed !== true) {
+        flagWarning("The password was reset, but the password gate could not be confirmed. The account may be locked for password changes until it is recovered. Do not rely on the change prompt; check the account.");
       }
     } catch (e: unknown) {
       if (requestStarted && !resultHandled) {

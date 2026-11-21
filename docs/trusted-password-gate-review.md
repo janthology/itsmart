@@ -69,3 +69,7 @@ The design lists what must be proven against hosted Auth: whether an admin passw
 ## Phase 1 status (2026-11-21)
 
 Phase 1 is built and tested locally: migration `20261101000024`, its rollback, PGlite tests, and a real-concurrency script on disposable PostgreSQL 17.11. It is **not applied to production**. The SQL, rollback and test results are in `docs/password-gate-phase1-review.md`, which needs your approval before any production change.
+
+## Phase 2 status (2026-11-21)
+
+Phase 2 is built and tested locally, and committed to the branch. It is **not deployed**. The handlers call the Phase 1 functions (`change-password`, `reset-password`, `create-user`), and the frontend shows the new refusal and locked-account warnings. Review, the stranded-account table, and deployment decisions are in `docs/password-gate-phase2-review.md`.

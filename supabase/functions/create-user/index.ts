@@ -111,6 +111,35 @@ async function requireActiveAdministrator(
     : null
 }
 
+// Gate RPC outcome. 'refused' is returned only for HTTP 400, which PostgREST
+// uses when the database function raised an exception: nothing was changed.
+// Any other failure is 'unknown' and must be treated as possibly applied.
+type GateOutcome = 'ok' | 'refused' | 'unknown'
+
+async function gateRpc(
+  supabaseUrl: string,
+  serviceKey: string,
+  name: 'password_gate_begin_reset' | 'password_gate_finish_reset',
+  userId: string,
+  operation: string,
+): Promise<GateOutcome> {
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_user: userId, p_operation: operation }),
+    })
+    if (response.ok) return 'ok'
+    return response.status === 400 ? 'refused' : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // Browser preflight requests carry no credentials, so answer them before
   // doing any configuration, authentication, or dependency work.
@@ -256,6 +285,22 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(500, {
         code: 'cleanup_requested', userId: createdUser.id,
         error: 'User setup failed and the new Auth account was removed. Verify Auth and the profile before retrying.',
+      })
+    }
+
+    // Record the gate state so the new account can change its password through
+    // the gate. The temporary password is withheld unless both steps confirm.
+    // A failure leaves the account created and flagged, without a usable gate
+    // state; use Reset password to recover. The Auth account is not deleted here.
+    const operation = crypto.randomUUID()
+    const begin = await gateRpc(supabaseUrl, serviceKey, 'password_gate_begin_reset', createdUser.id, operation)
+    const finish = begin === 'ok'
+      ? await gateRpc(supabaseUrl, serviceKey, 'password_gate_finish_reset', createdUser.id, operation)
+      : 'unknown'
+    if (finish !== 'ok') {
+      return jsonResponse(503, {
+        code: 'gate_unconfirmed', userId: createdUser.id,
+        error: 'The account was created, but its password gate could not be confirmed. Do not share a password. Use Reset password for this account to recover.',
       })
     }
 

@@ -53,7 +53,7 @@ for (const name of ['create-user', 'reset-password'] as const) {
 
 describe('reset-password failure handling', () => {
   const flag = { id: target, must_change_password: true };
-  const setup = (options: { firstFlag?: Response | Error; secondFlag?: Response | Error; auth?: Response | Error } = {}) => {
+  const setup = (options: { firstFlag?: Response | Error; secondFlag?: Response | Error; auth?: Response | Error; begin?: Response | Error; finish?: Response | Error } = {}) => {
     let patches = 0;
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -64,6 +64,8 @@ describe('reset-password failure handling', () => {
         patches++;
         result = (patches === 1 ? options.firstFlag : options.secondFlag) ?? json([flag]);
       } else if (url.includes('/auth/v1/admin/users/') && init?.method === 'PUT') result = options.auth ?? json({ id: target });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_begin_reset')) result = options.begin ?? new Response(null, { status: 204 });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_finish_reset')) result = options.finish ?? new Response(null, { status: 204 });
       else throw new Error('unexpected privileged request');
       if (result instanceof Error) throw result;
       return result;
@@ -77,7 +79,8 @@ describe('reset-password failure handling', () => {
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({ success: true, profileFlag: 'confirmed', sessionRevocation: 'unverified' });
     expect(payload.temporaryPassword).toHaveLength(20);
-    expect(fetch.mock.calls.map(([, init]) => init?.method ?? 'GET')).toEqual(['GET', 'GET', 'PATCH', 'PUT', 'PATCH']);
+    expect(fetch.mock.calls.map(([url, init]) => (String(url).includes('/rpc/') ? 'RPC ' + String(url).split('/rpc/')[1] : init?.method ?? 'GET'))).toEqual(['GET', 'GET', 'PATCH', 'RPC password_gate_begin_reset', 'PUT', 'RPC password_gate_finish_reset', 'PATCH']);
+    expect(payload).toMatchObject({ gateConfirmed: true });
     expect(fetch.mock.calls.some(([url]) => String(url).endsWith('/sessions'))).toBe(false);
   });
   it('rejects resetting the caller’s own account without touching it', async () => {
@@ -131,7 +134,7 @@ describe('reset-password failure handling', () => {
 describe('create-user failure handling', () => {
   const body = { email: 'synthetic@example.test', fullName: 'Synthetic', role: 'support_staff' };
   const profile = { id: target, role: 'support_staff', is_active: true, must_change_password: true };
-  const setup = (options: { create?: Response | Error; profile?: Response | Error; cleanup?: Response | Error } = {}) => {
+  const setup = (options: { create?: Response | Error; profile?: Response | Error; cleanup?: Response | Error; begin?: Response | Error; finish?: Response | Error } = {}) => {
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/auth/v1/user')) return json({ id: caller });
@@ -140,6 +143,8 @@ describe('create-user failure handling', () => {
       if (url.endsWith('/auth/v1/admin/users') && init?.method === 'POST') result = options.create ?? json({ id: target });
       else if (url.includes('/rest/v1/profiles') && init?.method === 'POST') result = options.profile ?? json([profile]);
       else if (url.includes('/auth/v1/admin/users/') && init?.method === 'DELETE') result = options.cleanup ?? json({});
+      else if (url.endsWith('/rest/v1/rpc/password_gate_begin_reset')) result = options.begin ?? new Response(null, { status: 204 });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_finish_reset')) result = options.finish ?? new Response(null, { status: 204 });
       else throw new Error('unexpected request');
       if (result instanceof Error) throw result;
       return result;
@@ -201,3 +206,110 @@ describe('create-user failure handling', () => {
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false);
   });
 });
+
+describe('reset-password gate recording (Phase 2)', () => {
+  const flagged = { id: target, must_change_password: true };
+  const setupReset = (options: { firstFlag?: Response | Error; begin?: Response | Error; auth?: Response | Error; finish?: Response | Error } = {}) => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/auth/v1/user')) return json({ id: caller });
+      if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
+      let result: Response | Error;
+      if (url.includes('/rest/v1/profiles') && init?.method === 'PATCH') result = options.firstFlag ?? json([flagged]);
+      else if (url.includes('/auth/v1/admin/users/') && init?.method === 'PUT') result = options.auth ?? json({ id: target });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_begin_reset')) result = options.begin ?? new Response(null, { status: 204 });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_finish_reset')) result = options.finish ?? new Response(null, { status: 204 });
+      else throw new Error('unexpected privileged request');
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    return { fetch, handler: loadFunction('reset-password', fetch as unknown as typeof globalThis.fetch) };
+  };
+  const rpcNames = (fetch: { mock: { calls: unknown[][] } }) => fetch.mock.calls.map(([u]) => String(u)).filter(u => u.includes('/rpc/')).map(u => u.split('/rpc/')[1]);
+  const puts = (fetch: { mock: { calls: unknown[][] } }) => fetch.mock.calls.filter(([, init]) => (init as RequestInit | undefined)?.method === 'PUT').length;
+
+  it('refuses before any Auth change when another operation holds the gate', async () => {
+    const { handler, fetch } = setupReset({ begin: json({ message: 'Password operation already in progress' }, 400) });
+    const response = await handler(request({ userId: target }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'reset_unavailable' });
+    expect(puts(fetch)).toBe(0);
+    expect(rpcNames(fetch)).toEqual(['password_gate_begin_reset']);
+  });
+  it('stops without an Auth change when the gate lock response is lost', async () => {
+    const { handler, fetch } = setupReset({ begin: new Error('network failure') });
+    const response = await handler(request({ userId: target }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'reset_unconfirmed' });
+    expect(puts(fetch)).toBe(0);
+    expect(rpcNames(fetch)).toEqual(['password_gate_begin_reset']);
+  });
+  it('sets the flag before taking the gate lock, so a failed flag write leaves no lock', async () => {
+    const { handler, fetch } = setupReset({ firstFlag: json({}, 500) });
+    const response = await handler(request({ userId: target }));
+    expect(await response.json()).toMatchObject({ code: 'profile_unconfirmed' });
+    expect(rpcNames(fetch)).toEqual([]);
+    expect(puts(fetch)).toBe(0);
+  });
+  it('keeps the new password and warns when the gate could not be recorded after Auth succeeds', async () => {
+    const { handler, fetch } = setupReset({ finish: json({}, 500) });
+    const response = await handler(request({ userId: target }));
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ success: true, gateConfirmed: false, sessionRevocation: 'unverified' });
+    expect(payload.temporaryPassword).toHaveLength(20);
+    expect(rpcNames(fetch)).toEqual(['password_gate_begin_reset', 'password_gate_finish_reset']);
+  });
+  it('does not complete the gate when the Auth change fails, leaving the lock held', async () => {
+    const { handler, fetch } = setupReset({ auth: json({}, 500) });
+    const response = await handler(request({ userId: target }));
+    expect(await response.json()).toMatchObject({ code: 'reset_unconfirmed' });
+    expect(rpcNames(fetch)).toEqual(['password_gate_begin_reset']);
+  });
+});
+
+describe('create-user gate recording (Phase 2)', () => {
+  const body = { email: 'synthetic@example.test', fullName: 'Synthetic', role: 'general_user' };
+  const profile = { id: target, role: 'general_user', is_active: true, must_change_password: true };
+  const setupCreate = (options: { begin?: Response | Error; finish?: Response | Error } = {}) => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/auth/v1/user')) return json({ id: caller });
+      if (url.includes('/rest/v1/profiles') && !init?.method) return json([{ role: 'administrator', is_active: true }]);
+      let result: Response | Error;
+      if (url.endsWith('/auth/v1/admin/users') && init?.method === 'POST') result = json({ id: target });
+      else if (url.includes('/rest/v1/profiles') && init?.method === 'POST') result = json([profile]);
+      else if (url.endsWith('/rest/v1/rpc/password_gate_begin_reset')) result = options.begin ?? new Response(null, { status: 204 });
+      else if (url.endsWith('/rest/v1/rpc/password_gate_finish_reset')) result = options.finish ?? new Response(null, { status: 204 });
+      else if (url.includes('/auth/v1/admin/users/') && init?.method === 'DELETE') result = json({});
+      else throw new Error('unexpected request');
+      if (result instanceof Error) throw result;
+      return result;
+    });
+    return { fetch, handler: loadFunction('create-user', fetch as unknown as typeof globalThis.fetch) };
+  };
+  it('records the gate state before returning the temporary password', async () => {
+    const { handler, fetch } = setupCreate();
+    const response = await handler(request(body));
+    expect(response.status).toBe(200);
+    expect((await response.json()).temporaryPassword).toHaveLength(20);
+    const urls = fetch.mock.calls.map(([u]) => String(u)).filter(u => u.includes('/rpc/')).map(u => u.split('/rpc/')[1]);
+    expect(urls).toEqual(['password_gate_begin_reset', 'password_gate_finish_reset']);
+  });
+  it('withholds the temporary password and skips cleanup when the gate lock response is lost', async () => {
+    const { handler, fetch } = setupCreate({ begin: new Error('network failure') });
+    const response = await handler(request(body));
+    const payload = await response.json();
+    expect(response.status).toBe(503);
+    expect(payload).toMatchObject({ code: 'gate_unconfirmed', userId: target });
+    expect(payload).not.toHaveProperty('temporaryPassword');
+    expect(fetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false);
+  });
+  it('withholds the temporary password when the gate completion is refused', async () => {
+    const { handler } = setupCreate({ finish: json({ message: 'Password operation mismatch' }, 400) });
+    const response = await handler(request(body));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'gate_unconfirmed' });
+  });
+});
+

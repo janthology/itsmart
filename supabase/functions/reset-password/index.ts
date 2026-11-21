@@ -98,6 +98,35 @@ async function requireActiveAdministrator(
     : null
 }
 
+// Gate RPC outcome. 'refused' is returned only for HTTP 400, which PostgREST
+// uses when the database function raised an exception: nothing was changed.
+// Any other failure is 'unknown' and must be treated as possibly applied.
+type GateOutcome = 'ok' | 'refused' | 'unknown'
+
+async function gateRpc(
+  supabaseUrl: string,
+  serviceKey: string,
+  name: 'password_gate_begin_reset' | 'password_gate_finish_reset',
+  userId: string,
+  operation: string,
+): Promise<GateOutcome> {
+  try {
+    const response = await fetch(`${supabaseUrl}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers: {
+        apikey: serviceKey,
+        Authorization: `Bearer ${serviceKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ p_user: userId, p_operation: operation }),
+    })
+    if (response.ok) return 'ok'
+    return response.status === 400 ? 'refused' : 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
 Deno.serve(async (req: Request) => {
   // Browser preflight requests carry no credentials, so answer them before
   // doing any configuration, authentication, or dependency work.
@@ -139,9 +168,8 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(400, { code: 'self_reset_forbidden', error: 'Use Change Password for your own account.' })
     }
 
-    // Set and verify the profile flag *before* touching Auth. This prevents
-    // returning an error with a changed password solely because this later
-    // profile write failed. It is still not an atomic Auth/profile operation.
+    // Set and verify the profile flag before the gate lock and the Auth change.
+    // A failure here leaves no lock, and no Auth change has happened.
     const profileUrl = new URL(`${supabaseUrl}/rest/v1/profiles`)
     profileUrl.searchParams.set('id', `eq.${userId}`)
     profileUrl.searchParams.set('select', 'id,must_change_password')
@@ -169,6 +197,17 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(503, { code: 'profile_unconfirmed', error: 'Account flag could not be confirmed. Password reset was not attempted; check the profile before retrying.' })
     }
 
+    // Take the gate lock. A refused lock means another operation is already in
+    // progress for this account, so no Auth change is attempted.
+    const operation = crypto.randomUUID()
+    const begin = await gateRpc(supabaseUrl, serviceKey, 'password_gate_begin_reset', userId, operation)
+    if (begin === 'unknown') {
+      return jsonResponse(503, { code: 'reset_unconfirmed', error: 'Password reset could not be confirmed. The account may now be locked for password operations. Do not retry; contact the recovery owner.' })
+    }
+    if (begin === 'refused') {
+      return jsonResponse(409, { code: 'reset_unavailable', error: 'Password reset is not available for this account right now. Nothing was changed.' })
+    }
+
     const temporaryPassword = generateTemporaryPassword()
     let resetResponse: Response
     try {
@@ -193,6 +232,12 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(503, { code: 'reset_unconfirmed', error: 'Password reset could not be confirmed. The password may have changed and the account is flagged; check the account before retrying.' })
     }
 
+    // Record the completed reset. A failure after the Auth change must never
+    // discard the new password, so the response still carries it with
+    // gateConfirmed false. The account then stays locked until recovery.
+    const finish = await gateRpc(supabaseUrl, serviceKey, 'password_gate_finish_reset', userId, operation)
+    const gateConfirmed = finish === 'ok'
+
     // The user could change their profile during the Auth request. Attempt to
     // flag it again. A failed response after Auth success must never discard
     // the new password: return it with an explicit recovery warning instead.
@@ -202,7 +247,7 @@ Deno.serve(async (req: Request) => {
     // revoked sessions. Existing access tokens can remain valid until expiry;
     // real session behavior must be verified on a compatible Supabase stack.
     // Only the verified administrator receives the one-time password.
-    return jsonResponse(200, { success: true, temporaryPassword, profileFlag, sessionRevocation: 'unverified' })
+    return jsonResponse(200, { success: true, temporaryPassword, profileFlag, gateConfirmed, sessionRevocation: 'unverified' })
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Internal server error'
     return jsonResponse(500, { error: message })
