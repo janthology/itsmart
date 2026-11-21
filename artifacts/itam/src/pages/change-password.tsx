@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, KeyRound, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { clearPasswordChangeReview, readPasswordChangeReview, savePasswordChangeReview } from "@/lib/password-change-review";
+import { classifyChangePasswordResponse, type ChangePasswordOutcome } from "@/lib/change-password-outcome";
 
 function getStrength(pw: string): { score: number; label: string; color: string } {
   if (!pw) return { score: 0, label: "", color: "" };
@@ -36,6 +37,21 @@ function passwordMeetsAllRules(pw: string): boolean {
   return PASSWORD_RULES.every(r => r.test(pw));
 }
 
+// supabase-js reports non-2xx responses as an error whose `context` is the
+// fetch Response. Read only the status and the machine-readable code.
+async function readFailure(error: unknown): Promise<{ status: number | null; code: string | null }> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (!(context instanceof Response)) return { status: null, code: null };
+  let code: string | null = null;
+  try {
+    const body = await context.clone().json() as { code?: unknown };
+    if (typeof body.code === 'string') code = body.code;
+  } catch {
+    // No readable body: classify by status alone.
+  }
+  return { status: context.status, code };
+}
+
 export default function ChangePassword() {
   const { user, clearMustChangePassword, mustChangePassword } = useAuth();
   const { toast } = useToast();
@@ -48,12 +64,10 @@ export default function ChangePassword() {
   const [showNext, setShowNext] = useState(false);
   const [loading, setLoading] = useState(false);
   const submitInFlight = useRef(false);
-  const [pendingPasswordChangedAt, setPendingPasswordChangedAt] = useState<string | null>(null);
   const [reviewState, setReviewState] = useState<'checking' | 'clear' | 'pending' | 'unavailable'>('checking');
-  const profileUpdatePending = pendingPasswordChangedAt !== null;
 
   useEffect(() => {
-    setCurrent(""); setNext(""); setConfirm(""); setPendingPasswordChangedAt(null);
+    setCurrent(""); setNext(""); setConfirm("");
     if (!user?.id) { setReviewState('checking'); return; }
     try {
       setReviewState(readPasswordChangeReview(window.sessionStorage, user.id) ? 'pending' : 'clear');
@@ -74,35 +88,29 @@ export default function ChangePassword() {
 
   const isMandatory = mustChangePassword;
 
-  // Auth and profile updates are separate operations. Never repeat the Auth
-  // update after it succeeds: retries only finish the pending profile update.
-  const finishProfileUpdate = async (changedAt: string) => {
-    if (!user?.id) throw new Error("Your session is no longer available.");
-    const { data, error } = await supabase.from("profiles").update({
-      must_change_password: false,
-      password_changed_at: changedAt,
-    }).eq("id", user.id).select("id");
-    if (error || data?.length !== 1) throw new Error("Could not update the account record.");
-    // The Auth and profile writes both succeeded. If storage fails, leave the
-    // warning marker for review rather than retrying the password update.
-    try { clearPasswordChangeReview(window.sessionStorage, user.id); setReviewState('clear'); }
+  // The server verifies the current password, changes it, revokes every
+  // session, and clears the flag. The browser never writes those columns.
+  const releaseReview = (userId: string) => {
+    try { clearPasswordChangeReview(window.sessionStorage, userId); }
     catch { setReviewState('unavailable'); }
-    setPendingPasswordChangedAt(null);
-    toast({ title: "Password changed", description: "Your password has been updated successfully." });
-    clearMustChangePassword();
-    setLocation("/dashboard");
   };
 
-  const retryProfileUpdate = async () => {
-    setLoading(true);
-    try {
-      if (!pendingPasswordChangedAt) return;
-      await finishProfileUpdate(pendingPasswordChangedAt);
-    } catch {
-      toast({ variant: "destructive", title: "Account update still incomplete", description: "Your new password is already active. Try again or contact an administrator." });
-    } finally {
-      setLoading(false);
-    }
+  const finishSuccessfulChange = async (userId: string) => {
+    setCurrent(""); setNext(""); setConfirm("");
+    releaseReview(userId);
+    clearMustChangePassword();
+    // All sessions were revoked on the server. Clear local state and sign in again.
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    toast({ title: "Password changed", description: "Sign in with your new password." });
+    setLocation("/login");
+  };
+
+  const endSessionForSignIn = async (userId: string) => {
+    releaseReview(userId);
+    clearMustChangePassword();
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
+    toast({ variant: "destructive", title: "Session ended", description: "Sign in again to change your password." });
+    setLocation("/login");
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -121,45 +129,53 @@ export default function ChangePassword() {
       return;
     }
 
+    const userId = user.id;
     submitInFlight.current = true;
     setLoading(true);
-    let updateStarted = false;
     try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({ email: user.email ?? "", password: current });
-      if (signInError) {
-        toast({ variant: "destructive", title: "Could not verify current password", description: "Check your password and connection, then try again." });
-        return;
-      }
-      // Store a content-free review marker before the potentially ambiguous
-      // Auth mutation. A second attempt in this tab requires explicit review.
+      // Store the review marker before the request. Ambiguous outcomes keep it.
       try {
-        if (readPasswordChangeReview(window.sessionStorage, user.id)) { setReviewState('pending'); return; }
-        savePasswordChangeReview(window.sessionStorage, user.id);
+        if (readPasswordChangeReview(window.sessionStorage, userId)) { setReviewState('pending'); return; }
+        savePasswordChangeReview(window.sessionStorage, userId);
       } catch {
         setReviewState('unavailable');
         return;
       }
-      updateStarted = true;
-      const { error } = await supabase.auth.updateUser({ password: next });
-      if (error) throw error;
 
-      // Clear secrets immediately; the new password is now active even if the
-      // following request fails or returns no updated row.
-      setCurrent(""); setNext(""); setConfirm("");
-      const changedAt = new Date().toISOString();
-      try {
-        await finishProfileUpdate(changedAt);
-      } catch {
-        setPendingPasswordChangedAt(changedAt);
+      const { data, error } = await supabase.functions.invoke<{ code?: string }>("change-password", {
+        body: { currentPassword: current, newPassword: next },
+      });
+      let outcome: ChangePasswordOutcome;
+      if (error) {
+        const failure = await readFailure(error);
+        outcome = classifyChangePasswordResponse(failure.status, failure.code);
+      } else {
+        outcome = classifyChangePasswordResponse(200, data?.code ?? null);
+      }
+
+      switch (outcome.kind) {
+        case 'changed':
+          await finishSuccessfulChange(userId);
+          return;
+        case 'session_ended':
+          await endSessionForSignIn(userId);
+          return;
+        case 'rejected':
+          releaseReview(userId);
+          setCurrent("");
+          toast({ variant: "destructive", title: "Password not changed", description: outcome.message });
+          return;
+        case 'ambiguous':
+          setCurrent(""); setNext(""); setConfirm("");
+          setReviewState('pending');
+          toast({ variant: "destructive", title: "Password change not confirmed", description: "The change may have completed. Review the result before trying again." });
+          return;
       }
     } catch {
-      if (updateStarted) {
-        setCurrent(""); setNext(""); setConfirm("");
-        setReviewState('pending');
-        toast({ variant: "destructive", title: "Password change not confirmed", description: "The update may have completed. Review the result before trying again." });
-      } else {
-        toast({ variant: "destructive", title: "Could not verify current password", description: "Check your connection and try again." });
-      }
+      // Unexpected failure after the request started: never assume it was safe.
+      setCurrent(""); setNext(""); setConfirm("");
+      setReviewState('pending');
+      toast({ variant: "destructive", title: "Password change not confirmed", description: "The change may have completed. Review the result before trying again." });
     } finally {
       submitInFlight.current = false;
       setLoading(false);
@@ -184,20 +200,10 @@ export default function ChangePassword() {
             <CardTitle className="text-xl font-display flex items-center gap-2">
               <KeyRound className="w-5 h-5 text-primary" /> Change Password
             </CardTitle>
-            <CardDescription>{profileUpdatePending ? "Finish updating your account record." : reviewState === 'clear' ? "Enter your current password and choose a new one." : "Review the previous attempt before continuing."}</CardDescription>
+            <CardDescription>{reviewState === 'clear' ? "Enter your current password and choose a new one. You will be asked to sign in again afterwards." : "Review the previous attempt before continuing."}</CardDescription>
           </CardHeader>
           <CardContent className="px-8 pb-8">
-            {profileUpdatePending ? (
-              <div className="space-y-4">
-                <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-                  <p className="font-semibold">Your new password is active, but the account update is incomplete.</p>
-                  <p className="mt-1">Use your new password to sign in. Retry the account update below. If the problem continues, contact an administrator. If you reload, use your new password as the current password.</p>
-                </div>
-                <Button type="button" onClick={retryProfileUpdate} disabled={loading} className="w-full rounded-xl">
-                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Retry account update
-                </Button>
-              </div>
-            ) : reviewState === 'checking' ? (
+            {reviewState === 'checking' ? (
               <p className="text-sm text-muted-foreground">Checking for an unfinished attempt…</p>
             ) : reviewState === 'unavailable' ? (
               <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
@@ -206,7 +212,7 @@ export default function ChangePassword() {
             ) : reviewState === 'pending' ? (
               <div role="alert" className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
                 <p className="font-semibold">A previous password change was not fully confirmed.</p>
-                <p>It may have completed or may still be processing. Do not repeat it immediately. Sign out and check which password works, or contact an administrator. If the account update was incomplete, a further password change may still be required.</p>
+                <p>It may have completed or may still be processing. Do not repeat it immediately. Sign out and check which password works, or contact an administrator. If the account record was not updated, you may be asked to change your password again at sign-in.</p>
                 <Button type="button" variant="outline" onClick={acknowledgeReview}>I reviewed the result; allow another attempt</Button>
               </div>
             ) : <form onSubmit={handleSubmit} className="space-y-5">
@@ -250,7 +256,6 @@ export default function ChangePassword() {
                   const s = getStrength(next);
                   return (
                     <div className="space-y-2 pt-1">
-                      {/* Strength bar */}
                       <div className="flex gap-1">
                         {[1,2,3,4].map(i => (
                           <div key={i} className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${i <= Math.ceil(s.score / 1.25) ? s.color : 'bg-muted'}`} />
@@ -259,7 +264,6 @@ export default function ChangePassword() {
                       <p className={`text-xs font-medium ${s.score <= 1 ? 'text-red-500' : s.score <= 2 ? 'text-amber-500' : s.score <= 3 ? 'text-blue-500' : 'text-emerald-500'}`}>
                         {s.label}
                       </p>
-                      {/* Per-rule checklist */}
                       <ul className="space-y-1">
                         {PASSWORD_RULES.map(rule => {
                           const met = rule.test(next);
