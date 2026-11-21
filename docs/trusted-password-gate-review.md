@@ -65,3 +65,7 @@ The design lists what must be proven against hosted Auth: whether an admin passw
 - **Still open for Phase 2:** the dedicated test accounts. Do not use the retained administrator. The user-operated plan (`docs/user-operated-signed-in-test-plan.md`) lists three dedicated accounts; confirm they are the ones to use.
 - **Not implemented:** the gate itself. Until Phase 3, the flag is enforced only in the app.
 
+
+## Phase 1 status (2026-11-21)
+
+Phase 1 is built and tested locally: migration `20261101000024`, its rollback, PGlite tests, and a real-concurrency script on disposable PostgreSQL 17.11. It is **not applied to production**. The SQL, rollback and test results are in `docs/password-gate-phase1-review.md`, which needs your approval before any production change.

@@ -26,6 +26,7 @@ beforeAll(async () => {
     CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     GRANT USAGE ON SCHEMA auth TO authenticated,anon,service_role;
     CREATE TABLE auth.users(id uuid PRIMARY KEY,email text, raw_user_meta_data jsonb DEFAULT '{}'::jsonb, raw_app_meta_data jsonb DEFAULT '{}'::jsonb,last_sign_in_at timestamptz);
+    CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz);
     CREATE SCHEMA cron;
     CREATE TABLE cron.job(jobid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,jobname text UNIQUE,schedule text,command text);
     CREATE FUNCTION cron.schedule(text,text,text) RETURNS bigint LANGUAGE plpgsql AS $$DECLARE i bigint; BEGIN INSERT INTO cron.job(jobname,schedule,command) VALUES ($1,$2,$3) ON CONFLICT(jobname) DO UPDATE SET schedule=$2,command=$3 RETURNING jobid INTO i; RETURN i; END$$;
@@ -397,7 +398,7 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     // bypass, not a production exploit or a complete authorization audit.
     await db.exec("RESET ROLE; SELECT set_config('request.jwt.claim.sub','',false); BEGIN;");
     try {
-      await db.exec("CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)");
+      await db.exec("CREATE TABLE IF NOT EXISTS auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)");
       await db.exec(readFileSync(new URL('../../../../supabase/proposals/password-gate/operations.sql', import.meta.url), 'utf8'));
       await db.exec(readFileSync(new URL('../../../../supabase/proposals/password-gate/authorization.sql', import.meta.url), 'utf8'));
       const sid = '10000000-0000-4000-8000-000000000009';
@@ -462,7 +463,7 @@ describe('full repository migrations in isolated PostgreSQL', () => {
     const adminChange = '20000000-0000-4000-8000-000000000015';
     const load = (name: string) => readFileSync(new URL(`../../../../supabase/proposals/password-gate/${name}`, import.meta.url), 'utf8');
     try {
-      await db.exec('CREATE TABLE auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)');
+      await db.exec('CREATE TABLE IF NOT EXISTS auth.sessions(id uuid PRIMARY KEY,user_id uuid NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),not_after timestamptz)');
       for (const name of ['operations.sql', 'authorization.sql', 'session-authorization.sql', 'admission-integration.sql', 'role-helpers.sql', 'onboarding.sql']) await db.exec(load(name));
       // A newly inserted Auth user must be born blocked in the same transaction.
       const newUser = '00000000-0000-4000-8000-000000000090';
