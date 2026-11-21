@@ -90,3 +90,14 @@ Approved by the user on 2026-11-21 ("deploy the repo versions").
 - `create-user`: `git show c6f746c:supabase/functions/create-user/index.ts` (247 lines), `verify_jwt` false.
 
 Rollback restores the known gaps listed above (password set before flag; no self-reset guard; undocumented session-delete call in reset-password; no profile confirmation in create-user). Use it only if the new functions block administrators and no other fix is available.
+
+## Status check 2026-11-21: remaining items, reconciled
+
+- **`00017` (SLA recipient dedup, reopen cycle):** applied to production as `20261120203219 sla_recipient_reopen_cycle`. The repo file matches the recorded SHA-256 (`d66b3f31…9471`), and its rollback matches `db8d9dad…9471`. Earlier notes that call it "prepared, not applied" are superseded.
+- **Dependency advisories:** `pnpm audit` (root, `--prod`) and `pnpm audit` in `artifacts/itam` both report no known vulnerabilities on `65164a0`. The `xlsx` package is no longer a dependency; reports use `write-excel-file`. Earlier notes that call dependency advisories open are superseded.
+- **Local tests:** 29 files, 241 tests passed. `tsc --noEmit` exit 0.
+- **`00019` (transactional entity audit) and `00021` (audit retention preview):** not applied. Local proposals. Production application needs a separate approval of the exact SQL and rollback.
+- **CSP:** still `Content-Security-Policy-Report-Only` in `vercel.json`. No `report-uri` or `report-to` is configured, so enforcement is not yet safe to turn on.
+- **Trusted password gate (server-side enforcement across RLS and RPCs):** not implemented. The design is in `docs/trusted-password-gate-design.md`. It needs a separate approved design and migration.
+- **Real signed-in tests (security, accessibility, concurrency):** not run against live accounts. They need user-operated test accounts.
+- **Pilot data wipe:** not approved and not executed. See `docs/pilot-data-wipe-plan.md`.
