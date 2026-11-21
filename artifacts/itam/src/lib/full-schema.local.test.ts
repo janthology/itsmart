@@ -597,6 +597,20 @@ describe('csp_violation_reports privileges (00023)', () => {
     await expect(db.query(`INSERT INTO csp_violation_reports(blocked_uri) VALUES ('${'a'.repeat(501)}')`)).rejects.toThrow(/check constraint/);
     await db.exec('RESET ROLE');
   });
+  it('purges only reports older than 90 days, callable by no API role', async () => {
+    await db.exec(`RESET ROLE; SET ROLE service_role;
+      INSERT INTO csp_violation_reports(received_at,blocked_uri) VALUES (clock_timestamp() - interval '100 days','old');
+      INSERT INTO csp_violation_reports(received_at,blocked_uri) VALUES (clock_timestamp() - interval '10 days','recent');`);
+    await db.exec('RESET ROLE');
+    const removed = await db.query<{ n: string }>('SELECT public.purge_csp_violation_reports()::text AS n');
+    expect(removed.rows[0].n).toBe('1');
+    expect((await db.query<{ blocked_uri: string }>("SELECT blocked_uri FROM csp_violation_reports WHERE blocked_uri IN ('old','recent') ORDER BY id")).rows).toEqual([{ blocked_uri: 'recent' }]);
+    await db.exec('RESET ROLE; SET ROLE authenticated;');
+    await expect(db.query('SELECT public.purge_csp_violation_reports()')).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE; SET ROLE service_role;');
+    await expect(db.query('SELECT public.purge_csp_violation_reports()')).rejects.toThrow(/permission denied/);
+    await db.exec('RESET ROLE');
+  });
   it('rollback revokes service-role insert but keeps stored reports', async () => {
     const rollback = readFileSync(new URL('../../../../supabase/rollbacks/20261101000023_csp_violation_reports.sql', import.meta.url), 'utf8');
     await db.exec(rollback);
@@ -604,7 +618,8 @@ describe('csp_violation_reports privileges (00023)', () => {
     await expect(db.query(sample)).rejects.toThrow(/permission denied/);
     await db.exec('RESET ROLE');
     await asUser(admin);
-    expect((await db.query<{ n: number }>('SELECT count(*)::int AS n FROM csp_violation_reports')).rows[0].n).toBe(1);
+    // Two rows remain: the sample and the 10-day-old row kept by the purge test.
+    expect((await db.query<{ n: number }>('SELECT count(*)::int AS n FROM csp_violation_reports')).rows[0].n).toBe(2);
     await db.exec('RESET ROLE');
   });
 });

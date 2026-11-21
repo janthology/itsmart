@@ -25,3 +25,16 @@ GRANT USAGE ON SEQUENCE public.csp_violation_reports_id_seq TO service_role;
 DROP POLICY IF EXISTS csp_violation_reports_read_admin ON public.csp_violation_reports;
 CREATE POLICY csp_violation_reports_read_admin ON public.csp_violation_reports FOR SELECT TO authenticated
   USING (public.get_my_role() = 'administrator'::public.user_role);
+
+-- Retention: reports are deleted 90 days after receipt. The function is not
+-- scheduled here; a cron job needs its own approval. It is owned by the
+-- migration role and is not callable by any API role.
+CREATE OR REPLACE FUNCTION public.purge_csp_violation_reports() RETURNS bigint
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
+DECLARE deleted_count bigint;
+BEGIN
+  DELETE FROM public.csp_violation_reports WHERE received_at < clock_timestamp() - interval '90 days';
+  GET DIAGNOSTICS deleted_count = ROW_COUNT;
+  RETURN deleted_count;
+END $$;
+REVOKE ALL ON FUNCTION public.purge_csp_violation_reports() FROM PUBLIC, anon, authenticated, service_role;
