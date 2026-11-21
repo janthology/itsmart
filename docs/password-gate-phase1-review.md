@@ -1,6 +1,6 @@
 # Trusted password gate, Phase 1: review package (non-enforcing)
 
-Status (2026-11-21): **built and tested locally. NOT applied to production.** Applying migration `20261101000024` needs your approval of the SQL and rollback below. Nothing in the app calls these functions yet, and no existing policy, grant, trigger or function changes.
+Status (2026-11-21): **APPLIED to production** as live migration `20261121174713 password_gate_infrastructure`, after the user approved the SQL and rollback above. Verified by read-only checks and rolled-back probes (see "Production application" below). Nothing in the app calls these functions yet, and no existing policy, grant, trigger or function changed.
 
 Phase 1 is the first of four approved-one-at-a-time steps in `docs/trusted-password-gate-review.md`. Phase 0 scope (all business data) is recorded there.
 
@@ -76,3 +76,12 @@ If any row is `resetting` or `changing`, stop. That operation has an unknown Aut
 ## Decision needed
 
 Approve applying `20261101000024` to production, with the SQL and rollback above, as a new live migration. Phase 2 needs its own review and approval.
+
+## Production application (2026-11-21)
+
+- Applied as `20261121174713 password_gate_infrastructure`. Repo file SHA-256 `162bd9de…`. Live migration history: 24 migrations.
+- Read-only checks: both tables have RLS on and zero policies; `anon` and `authenticated` have no table privilege; the six functions are `SECURITY DEFINER` with `search_path=pg_catalog, public`; `authenticated` cannot execute them; `service_role` can.
+- Rolled-back probe, one active general user, as `service_role`: a second reset during an in-progress reset was refused; a stale change completion was refused; a repeated completion of the current change was accepted. The probe rolled back.
+- After the probe: state rows 0, admitted-session rows 0, flagged profiles 0, tickets 27, audit rows 0, profile flags unchanged.
+- Not applied to any other object. No Edge Function, frontend or handler changes.
+

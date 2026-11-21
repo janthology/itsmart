@@ -113,3 +113,10 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - **Correction:** the earlier note that unchanged updates write no audit row was wrong. `updated_at` changes on every ticket UPDATE, so a no-op rewrite writes a row.
 - **Edge functions:** `reset-password` v5, `create-user` v4, `change-password` v1, and now `csp-report` v1. All ACTIVE, all `verify_jwt` false.
 - **Pilot wipe:** the audit trigger records each deleted row. Decision recorded by the user: keep the wipe's audit rows (`docs/pilot-data-wipe-plan.md` section 4). No deletion authorized.
+
+## Update 2026-11-21: password gate Phase 1 applied
+
+- **`20261101000024` password gate infrastructure:** applied to production as `20261121174713 password_gate_infrastructure` after the user's approval. Repo file SHA-256 `162bd9de…`, rollback `5084ec59…`. Non-enforcing: new service-only tables `password_gate_state` and `password_gate_admitted_sessions`, six service-only functions, no policy or existing-function change, no profile flag written. Live history: 24 migrations. Details and rollback limits: `docs/password-gate-phase1-review.md`.
+- **Not changed:** Edge Functions, frontend, Vercel production (`dpl_783iuK…`, `15154ff`), CSP header (`Report-Only`, no `report-uri`).
+- **Open:** CSP synthetic POST still needs a 204 result. The phase 2 handlers need their own approval.
+
