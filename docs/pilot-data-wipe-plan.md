@@ -67,7 +67,7 @@ Open questions for the user:
   - Recommendation: keep `entity_change_audit` through the wipe. It is the only record of who removed what, and it is administrator-only. Keep it under the 90-day/3-year rule of the audit decision, and do not purge it as part of the wipe.
   - Effect on the wipe: the table will grow by roughly the number of deleted rows (tickets 27, assets 26, comments 200, asset history 140, maintenance log 6, before cascades). Record the count before and after the wipe.
   - Alternative (not recommended, not approved): disable the five triggers for the wipe session and record the wipe in `admin_audit_log` only. This removes the per-row record of the deletion. It needs a separate approval and a rollback step to re-enable the triggers.
-  - Decision needed from the user: keep the audit rows from the wipe (recommended) or disable the triggers for the wipe (alternative).
+  - **Decided 2026-11-21 by the user: keep the audit rows from the wipe.** The triggers stay enabled during the wipe. This is still not approval to run the wipe.
 
 ## 5. Cron jobs during the wipe
 
@@ -100,7 +100,7 @@ Dry run: before production, run the same SQL against a disposable local PostgreS
 
 - Written approval of the deletion scope in section 3.
 - Named retained administrator (section 2).
-- Decisions on counters, audit rows (`admin_audit_log` and `entity_change_audit`) and any extra retained profiles (sections 3 and 4).
+- Decisions on counters and any extra retained profiles (sections 3 and 4). Audit rows: decided, keep (`entity_change_audit` stays enabled during the wipe).
 - Approval to pause the four cron jobs (section 5).
 - Approval of the wipe window and the notice to pilot users.
 - Approval of the Auth deletion method (Admin API, one account at a time).
