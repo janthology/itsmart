@@ -50,3 +50,16 @@ This record lists what changed outside Git on 2026-10-28, what was held back, an
 
 - **Account test4@gmail.com** (synthetic test user, `ORD`): admin reset ran at 10:20:57 UTC. The reset response warned that the flag could not be confirmed, but the database showed `must_change_password = true`. The user then signed in and changed the password. After the change, the database showed `must_change_password = false` and `password_changed_at` set (10:24:19 UTC). This is one live run, not a full test. The Edge Function logs were not readable from the sandbox, so which server path cleared the flag was not directly confirmed.
 - **Browser e2e:** the previous CI `e2e-smoke` job failed on `2edfa7a`. Two tests in `artifacts/itam/e2e/role-pages.spec.ts` still mocked the old direct profile-update recovery path, which the page no longer uses. I removed those two cases (the 403 and no-row variants). The replacement cases (review marker, success, wrong password, label association) remain. Local run against the production build with Chromium 131: 61 passed, 0 failed. The sandbox has no Playwright Chromium download, so the local run used a Chromium binary from npm (`@sparticuz/chromium`).
+
+## Reconciliation 2026-11-21: current state
+
+This section supersedes the "Held back" and "Known gaps" text above, which describe the state on 2026-10-28. The earlier text is kept as history.
+
+- **Production frontend:** `dpl_783iuKSmLzHcxzyf7XmMJA1KEima` at `15154ff`, promoted. Rollback target: `dpl_F4exUtaVQX8WdTidmW93jC8DWMcw` (commit `a8e7204`).
+- **Migration `00022`:** applied as `20261121090050`. Rollback: `supabase/rollbacks/20261101000022_profile_password_flag_guard.sql`.
+- **Live migration history** (`list_migrations` on `rkwxdqludtdzbpuftsvi`, read-only) ends with `20261120203219 sla_recipient_reopen_cycle` and `20261121090050 profile_password_flag_guard`. Migrations `00018` and `00020` are live under versions `20261120083024` and `20261120133730`. `00017`, `00019`, and `00021` are not applied.
+- **Edge Function `change-password`:** ACTIVE, version 1, `verify_jwt` false. Still in use by production.
+- **`create-user` (v3) and `reset-password` (v4):** not modified. The repo-to-live match is still unverified.
+- **Browser e2e:** runs in GitHub CI `e2e-smoke`. The run on `672b813` passed (run `44897902791`). The earlier "has not run" statements are superseded.
+- **Flagged account:** `test4@gmail.com` was cleared by the first live password change on 2026-11-21. No other account was known to be flagged at the last read-only check (1 flagged before the reset, 0 after the change). The "one active general user still has the flag" line in the 2026-11-21 update is superseded.
+- **Still unverified:** a second live password change on a different account; the production Vercel deployment behind SSO; which server path cleared the flag on `test4@gmail.com`.
