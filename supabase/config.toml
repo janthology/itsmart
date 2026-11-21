@@ -8,3 +8,7 @@ verify_jwt = false
 
 [functions.reset-password]
 verify_jwt = false
+
+# Authenticates the caller inside the handler; preflight must reach it.
+[functions.change-password]
+verify_jwt = false
