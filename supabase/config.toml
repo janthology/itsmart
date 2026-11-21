@@ -12,3 +12,9 @@ verify_jwt = false
 # Authenticates the caller inside the handler; preflight must reach it.
 [functions.change-password]
 verify_jwt = false
+
+# Browsers send CSP violation reports without credentials. The handler accepts
+# only POST bodies of the expected types and size, and writes only sanitized
+# fields with the service role.
+[functions.csp-report]
+verify_jwt = false
