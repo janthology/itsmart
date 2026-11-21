@@ -73,3 +73,20 @@ Read with `get_edge_function` on `rkwxdqludtdzbpuftsvi`. Nothing was deployed or
 - **`change-password`**: live v1 matches the committed source (checked earlier).
 
 Consequence: the live `reset-password` and `create-user` are older than the repo code. Deploying the repo versions is a separate approval, after tests. Do not treat the repo as deployed. See `docs/pilot-data-wipe-plan.md`, section 8.
+
+## Deployment 2026-11-21: repo versions of reset-password and create-user
+
+Approved by the user on 2026-11-21 ("deploy the repo versions").
+
+- **`reset-password`:** live v4 → **v5**, ACTIVE, `verify_jwt` false. Source: `supabase/functions/reset-password/index.ts` at `b5cf1cb`.
+- **`create-user`:** live v3 → **v4**, ACTIVE, `verify_jwt` false. Source: `supabase/functions/create-user/index.ts` at `b5cf1cb`.
+- **Verification before deploy:** `edge-functions.security.test.ts`, `password-gate-reset-edge.prototype.test.ts` and `change-password-edge.test.ts` passed, 71 tests, against the repo source. These use mocked fetch.
+- **Verification after deploy:** the live bodies from `get_edge_function` were written to scratch files and compared with the repo files. Both are identical.
+- **Frontend compatibility:** production `dpl_783iuKSmLzHcxzyf7XmMJA1KEima` (`15154ff`) already handles the new codes and fields (`self_reset_forbidden`, `profile_unconfirmed`, `reset_unconfirmed`, `profileFlag`, `creation_unconfirmed`, `cleanup_requested`, `cleanup_unconfirmed`).
+- **Not verified:** a live call through Auth. The sandbox cannot reach `supabase.co`. No test user was created, reset or changed. No data was written.
+
+**Rollback reference (exact previous live source).** The previous live bodies match commit `c6f746c` on every distinctive marker. The match is by marker, not byte-for-byte, because the previous live body was not hashed. To roll back, redeploy:
+- `reset-password`: `git show c6f746c:supabase/functions/reset-password/index.ts` (224 lines), `verify_jwt` false.
+- `create-user`: `git show c6f746c:supabase/functions/create-user/index.ts` (247 lines), `verify_jwt` false.
+
+Rollback restores the known gaps listed above (password set before flag; no self-reset guard; undocumented session-delete call in reset-password; no profile confirmation in create-user). Use it only if the new functions block administrators and no other fix is available.

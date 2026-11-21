@@ -101,7 +101,7 @@ Dry run: before production, run the same SQL against a disposable local PostgreS
 
 ## 8. Prerequisites that are still open
 
-- **Live Edge Function drift.** The repo source does not match the live source for two functions. Live `reset-password` (v4) sets the password before the profile flag, has no self-reset guard, and uses an undocumented session-deletion call. Live `create-user` (v3) lacks the repo's profile-confirmation and cleanup-unconfirmed handling. The repo versions are newer and have not been deployed. Pilot account creation and resets should use the repo versions. Deploying them is a separate approval.
+- **Edge Function drift: resolved 2026-11-21.** `reset-password` (v5) and `create-user` (v4) now run the repo source, byte-identical after deploy. The previous live versions matched commit `c6f746c`. See `docs/deployment-record-2026-10-28.md`. Live Auth paths are still not exercised from the sandbox.
 - **Second live password change** on a different account has not been done. The only live evidence is `test4@gmail.com`.
 - **Production preview behind Vercel SSO** has not been checked from the sandbox.
 - **Trusted password gate** is not complete. The `00022` trigger blocks direct flag writes, but the server path (`change-password`) has one live test only.
