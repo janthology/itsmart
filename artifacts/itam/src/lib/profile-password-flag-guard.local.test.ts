@@ -63,6 +63,22 @@ describe('profile password-flag guard (migration 00022)', () => {
     expect(rows[0].must_change_password).toBe(true);
   });
 
+  it('trigger alone blocks flag writes when column grants are widened', async () => {
+    // Grants are the first guard. Widen them so only the trigger can block the write.
+    await db.exec('GRANT UPDATE ON public.profiles TO authenticated');
+    try {
+      await asUser(general);
+      await expect(db.exec(`UPDATE profiles SET must_change_password=false WHERE id='${general}'`)).rejects.toThrow(/Forbidden/);
+      await expect(db.exec(`UPDATE profiles SET password_changed_at=now() WHERE id='${general}'`)).rejects.toThrow(/Forbidden/);
+      await db.exec('RESET ROLE');
+      const { rows } = await db.query<{ must_change_password: boolean }>(`SELECT must_change_password FROM profiles WHERE id='${general}'`);
+      expect(rows[0].must_change_password).toBe(true);
+    } finally {
+      await db.exec('RESET ROLE');
+      await db.exec('REVOKE UPDATE ON public.profiles FROM authenticated; GRANT UPDATE (role, full_name, department, is_active) ON public.profiles TO authenticated');
+    }
+  });
+
   it('still lets a general user update their own name and department', async () => {
     await asUser(general);
     await db.exec(`UPDATE profiles SET full_name='User Renamed', department='Ops' WHERE id='${general}'`);

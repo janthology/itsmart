@@ -21,8 +21,13 @@ GRANT UPDATE (role, full_name, department, is_active) ON public.profiles TO auth
 --    grants are later widened. Keyed on current_user, not auth.uid(), so that
 --    SECURITY DEFINER server functions (owner role) keep working for the
 --    approved completion path.
+--    The trigger function MUST be SECURITY INVOKER. Inside a SECURITY DEFINER
+--    function current_user is the owner, so the check never matches and the
+--    trigger would silently allow every write. Verified in a scratch PGlite run
+--    (2026-11-21): DEFINER allowed the direct write; INVOKER blocked it while
+--    still allowing service_role and the DEFINER completion function.
 CREATE OR REPLACE FUNCTION public.guard_profile_password_flags()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = public AS $$
 BEGIN
   IF current_user NOT IN ('authenticated', 'anon') THEN
     RETURN NEW;

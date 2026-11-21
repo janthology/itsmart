@@ -27,7 +27,7 @@ Effect on production (once applied): a signed-in user can no longer clear their 
 `supabase/rollbacks/20261101000022_profile_password_flag_guard.sql` drops the trigger and function and restores the table-level `GRANT UPDATE ON public.profiles TO authenticated`. Rollback restores the bypass; use it only if a flagged user is blocked and no other fix is available. Rollback does not change any row.
 
 ## Local verification
-- `artifacts/itam/src/lib/profile-password-flag-guard.local.test.ts` (6 tests): direct flag writes blocked; name/department edits allowed; admin role/active changes allowed; service path allowed; SECURITY DEFINER completion path allowed; rollback restores the previous grant.
+- `artifacts/itam/src/lib/profile-password-flag-guard.local.test.ts` (7 tests): direct flag writes blocked; trigger blocks writes alone when grants are widened (fails on the old SECURITY DEFINER version); name/department edits allowed; admin role/active changes allowed; service path allowed; SECURITY DEFINER completion path allowed; rollback restores the previous grant.
 - Full repository migration suite and typecheck pass (197 tests).
 - `artifacts/itam/src/lib/change-password-edge.test.ts` (25 tests): runs the real function source with mocked Auth/REST calls. Covers validation before upstream calls, wrong-password and outage handling, no retry of the Auth change, session revocation before flag clear, service-role scoping, and no secrets in responses.
 - The synthetic PostgreSQL run does not exercise GoTrue, PostgREST, Realtime or the hosted grants. The mocked function tests do not prove real GoTrue behavior, such as whether a password update revokes other sessions.
