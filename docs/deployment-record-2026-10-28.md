@@ -101,3 +101,13 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - **Trusted password gate (server-side enforcement across RLS and RPCs):** not implemented. The design is in `docs/trusted-password-gate-design.md`. It needs a separate approved design and migration.
 - **Real signed-in tests (security, accessibility, concurrency):** not run against live accounts. They need user-operated test accounts.
 - **Pilot data wipe:** not approved and not executed. See `docs/pilot-data-wipe-plan.md`.
+
+## Update 2026-11-21: structured audit applied; CSP package prepared
+
+- **`00019` transactional entity audit:** applied to production as `20261121160903 transactional_entity_audit`. Repo file SHA-256 `c690caed…`, rollback `da4c4e1e…`. Verified by read-only checks and rolled-back probes; details in `docs/structured-audit-review.md` section 7. Live rows after the probes: 0.
+- **`00021` audit retention preview:** applied as `20261121160953 audit_retention_preview`. Repo file SHA-256 `fb739c82…`, rollback `6d240eb9…`. Read-only; no purge.
+- **Live migration history:** 22 migrations. Latest `20261121160953`. `00018` and `00020` remain under their original live versions and were not reapplied.
+- **Correction:** the earlier note that unchanged updates write no audit row was wrong. `updated_at` changes on every ticket UPDATE, so a no-op rewrite writes a row.
+- **`csp-report` Edge Function and `00023` (`csp_violation_reports`):** prepared locally, **not committed, not deployed, not applied**. Retention 90 days via `purge_csp_violation_reports()`, which is not scheduled. Readable by active administrators only. Tests 38/38 with the three CSP privilege tests and the `csp-report` edge tests. Steps and approvals in `docs/csp-reporting-review.md`.
+- **Edge functions:** no change since the 2026-11-21 `reset-password` v5 and `create-user` v4 deployment. `change-password` v1 remains live.
+- **Pilot wipe:** the audit trigger will record each deleted row. The audit decision is in `docs/pilot-data-wipe-plan.md` section 4. No deletion authorized.
