@@ -102,12 +102,14 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - **Real signed-in tests (security, accessibility, concurrency):** not run against live accounts. They need user-operated test accounts.
 - **Pilot data wipe:** not approved and not executed. See `docs/pilot-data-wipe-plan.md`.
 
-## Update 2026-11-21: structured audit applied; CSP package prepared
+## Update 2026-11-21: structured audit applied; CSP reporting applied and deployed
 
 - **`00019` transactional entity audit:** applied to production as `20261121160903 transactional_entity_audit`. Repo file SHA-256 `c690caed…`, rollback `da4c4e1e…`. Verified by read-only checks and rolled-back probes; details in `docs/structured-audit-review.md` section 7. Live rows after the probes: 0.
 - **`00021` audit retention preview:** applied as `20261121160953 audit_retention_preview`. Repo file SHA-256 `fb739c82…`, rollback `6d240eb9…`. Read-only; no purge.
-- **Live migration history:** 22 migrations. Latest `20261121160953`. `00018` and `00020` remain under their original live versions and were not reapplied.
+- **`00023` CSP violation reports:** applied as `20261121161512 csp_violation_reports` after the user's approval of the SQL and rollback. Repo file SHA-256 `8f0e6df0…`, rollback `178416f3…`. Contents: table `csp_violation_reports` (RLS; admin-only read; service-role insert only), `purge_csp_violation_reports()` (90-day purge, `SECURITY DEFINER`, not executable by API roles, **not scheduled**). Verified by read-only checks and a rolled-back probe; live reports 0.
+- **`csp-report` Edge Function:** deployed as v1 ACTIVE, `verify_jwt` false (id `b543a6f8-82e2-47e5-9100-5a2bccdb1cd8`). Live source matches `supabase/functions/csp-report/index.ts`. **Not verified:** a live POST through the gateway. The sandbox cannot reach `supabase.co`. The synthetic check is in `docs/csp-reporting-review.md` step 2.
+- **Vercel:** unchanged. CSP stays `Content-Security-Policy-Report-Only` with no `report-uri`. No browser reports reach the function until a separate approval changes `vercel.json`.
+- **Live migration history:** 23 migrations. Latest `20261121161512`. `00018` and `00020` remain under their original live versions and were not reapplied.
 - **Correction:** the earlier note that unchanged updates write no audit row was wrong. `updated_at` changes on every ticket UPDATE, so a no-op rewrite writes a row.
-- **`csp-report` Edge Function and `00023` (`csp_violation_reports`):** prepared locally, **not committed, not deployed, not applied**. Retention 90 days via `purge_csp_violation_reports()`, which is not scheduled. Readable by active administrators only. Tests 38/38 with the three CSP privilege tests and the `csp-report` edge tests. Steps and approvals in `docs/csp-reporting-review.md`.
-- **Edge functions:** no change since the 2026-11-21 `reset-password` v5 and `create-user` v4 deployment. `change-password` v1 remains live.
-- **Pilot wipe:** the audit trigger will record each deleted row. The audit decision is in `docs/pilot-data-wipe-plan.md` section 4. No deletion authorized.
+- **Edge functions:** `reset-password` v5, `create-user` v4, `change-password` v1, and now `csp-report` v1. All ACTIVE, all `verify_jwt` false.
+- **Pilot wipe:** the audit trigger records each deleted row. Decision recorded by the user: keep the wipe's audit rows (`docs/pilot-data-wipe-plan.md` section 4). No deletion authorized.

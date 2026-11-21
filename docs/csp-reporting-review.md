@@ -1,6 +1,11 @@
 # CSP violation reporting: review package (migration 00023 and csp-report function)
 
-Status: **prepared locally. Nothing is deployed.** The migration is not applied, the Edge Function is not deployed, and `vercel.json` is unchanged. CSP stays `Content-Security-Policy-Report-Only`. Enforcement is not part of this package.
+Status (2026-11-21): **migration `00023` applied and `csp-report` deployed to production. `vercel.json` is unchanged and CSP stays `Content-Security-Policy-Report-Only`. No `report-uri` is configured yet, so no browser reports reach the function.** Enforcement is not part of this package.
+
+- Migration `00023` applied as live version `20261121161512 csp_violation_reports`. Repo file SHA-256 prefix `8f0e6df0…`, rollback `178416f3…`. History: 23 migrations.
+- `csp-report` deployed as v1, ACTIVE, `verify_jwt` false (function id `b543a6f8-82e2-47e5-9100-5a2bccdb1cd8`). Live source read back and matches the repo file.
+- Read-only and rolled-back checks: RLS on; only policy is `csp_violation_reports_read_admin`; `authenticated` SELECT only; `service_role` INSERT and sequence USAGE only; `anon` no table or sequence rights; `purge_csp_violation_reports()` is `SECURITY DEFINER` with `search_path=pg_catalog, public`, not executable by `anon`, `authenticated` or `service_role`. A rolled-back probe inserted one 100-day-old and one current row as `service_role`, then purged: 1 removed, 1 kept. The probe rolled back; live reports are 0.
+- **Not verified:** a live POST through the gateway. The sandbox cannot reach `supabase.co` (TLS fails). See the synthetic test below.
 
 ## Why
 
@@ -36,11 +41,11 @@ The table shows the first and last characters of each SHA-256. Run `sha256sum` o
 - `service_role` has INSERT and sequence USAGE only. It bypasses RLS in Supabase, which is intended for the function only.
 - Active administrators can read through RLS (`get_my_role() = 'administrator'`).
 - Length constraints stop oversize values even if written directly.
-- There is **no purge job and no retention decision yet** for these reports. Reports are operational data; they should not be kept indefinitely. Proposed default for your review: keep 90 days, with a separately approved purge. This is not implemented.
+- Retention: **90 days**, as approved. `purge_csp_violation_reports()` deletes reports older than 90 days. It is **not scheduled**; a cron job needs its own approval.
 
 ## Rollback
 
-The rollback revokes the service-role insert. The function then gets 503 from the database and stops storing reports. Stored reports, the read policy and the index are kept. Dropping the table would delete collected reports and needs a separate retention decision. To roll back the function, delete it from the project.
+The rollback revokes the service-role insert and drops the purge function. The function then gets 503 from the database and stops storing reports. Stored reports, the read policy and the index are kept. Dropping the table would delete collected reports and needs a separate retention decision. To roll back the function, delete `csp-report` from the project; if a purge job was scheduled, unschedule it first.
 
 ## Local verification
 
@@ -51,13 +56,21 @@ The rollback revokes the service-role insert. The function then gets 503 from th
 ## Steps to take this live (each needs your approval)
 
 1. Approve and apply migration `00023` to production as a new live version. Confirm the live name does not collide with an existing version.
-2. Approve and deploy `csp-report` with `verify_jwt` false, then check it with a synthetic report payload to a dedicated test path. The test must not write real violations.
+2. ~~Approve and deploy `csp-report`~~ **Done 2026-11-21 (v1).** Still to do: a synthetic check through the gateway. Run this from a machine with internet access (not the sandbox). It writes one row tagged `synthetic.invalid`, which the 90-day purge will remove:
+
+```
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST \
+  -H 'content-type: application/csp-report' \
+  --data '{"csp-report":{"document-uri":"https://synthetic.invalid/csp-test?token=x","blocked-uri":"https://synthetic.invalid/blocked#x","violated-directive":"script-src-elem","effective-directive":"script-src-elem","disposition":"report","line-number":1}}' \
+  https://rkwxdqludtdzbpuftsvi.supabase.co/functions/v1/csp-report
+```
+
+Expected: `204`. Then a read-only check: one row with `document_uri` = `https://synthetic.invalid/csp-test` (query string removed). Report the result. No deletion is needed; the 90-day purge removes it later.
 3. Change `vercel.json` to add `report-uri https://rkwxdqludtdzbpuftsvi.supabase.co/functions/v1/csp-report` to the report-only header. Keep it report-only. This needs a new frontend deployment and promotion approval.
 4. Let reports collect for a period you choose. Review each distinct violation: is it a real problem, a browser extension, or an expected resource that the policy should allow?
 5. Only then consider enforcement. That is a separate change to the header, which needs its own approval and rollback.
 
 ## Decisions needed
 
-- Retention for reports: 90 days with a purge, or another period?
-- Who may read reports: active administrators only (proposed), or also support staff?
-- Whether `document-uri` should be stored at all, or only the origin and path.
+- Answered: retention is 90 days. Reports are readable by active administrators only.
+- Open: whether `document-uri` should be stored at all, or only the origin and path. The function keeps the path and drops the query string and fragment. Confirm this is acceptable before step 3.
