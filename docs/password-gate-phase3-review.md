@@ -124,7 +124,7 @@ No policy exemption. The retained administrator signs in through the broker like
 
 This step does not change behaviour for the app, because the app does not use TRUNCATE, REFERENCES or TRIGGER through the Data API. Verify that no migration or trigger relies on those grants before applying.
 
-**Step 3.0 package (prepared 2026-11-23, not applied):**
+**Step 3.0 package (prepared and tested 2026-11-23; applied 2026-11-23 as migration `20261123181414`, approved as written):**
 
 - `supabase/proposals/password-gate/grant-cleanup.sql`: snapshot of relation, column and default ACLs into `private.grant_cleanup_snapshot` before any change; then the revokes; then a check that fails the script if anything remains.
 - `supabase/proposals/password-gate/grant-cleanup-rollback.sql`: restores every snapshotted grant and default privilege, then drops the snapshot table. It refuses to run without a snapshot.
@@ -228,4 +228,4 @@ Each signed-in test that writes creates or changes data, so it needs approval an
 
 ## 11. Next step
 
-Decisions D1 to D8 were accepted on 2026-11-23. The step 3.0 package is written and tested locally (section 4.8). Before anything reaches production, it needs your approval of its SQL and rollback, and of the three extra changes listed there, including the decision on `MAINTAIN`. After that, the next packages are step 3.1 (schema), step 3.4 (helpers and policies), and step 3.2 (broker login). Each one needs its own SQL, rollback, local test and approval. Nothing is applied to production without a separate approval.
+Decisions D1 to D8 were accepted on 2026-11-23. Step 3.0 was approved as written and applied on 2026-11-23 as migration `20261123181414`. Post-apply checks: no TRUNCATE, REFERENCES or TRIGGER for `anon` or `authenticated` on public relations; no column-level REFERENCES; `authenticated` keeps SELECT and the tickets write grants, and loses TRUNCATE; `service_role` keeps TRUNCATE; the profile column UPDATE grants are unchanged; the snapshot table holds 350 rows. `MAINTAIN` was not revoked, because it was not approved. Its decision is still open. The next packages are step 3.1 (schema), step 3.4 (helpers and policies), and step 3.2 (broker login). Each one needs its own SQL, rollback, local test and approval. Nothing is applied to production without a separate approval.

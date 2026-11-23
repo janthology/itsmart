@@ -120,3 +120,10 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - **Not changed:** Edge Functions, frontend, Vercel production (`dpl_783iuK…`, `15154ff`), CSP header (`Report-Only`, no `report-uri`).
 - **Open:** CSP synthetic POST still needs a 204 result. The phase 2 handlers need their own approval.
 
+## Update 2026-11-23: password gate Phase 3 step 3.0 (grant cleanup) applied
+
+- Supabase `DOST02-ITSMART` (`rkwxdqludtdzbpuftsvi`): migration `20261123181414 password_gate_grant_cleanup`, applied with `create_migration` after the user approved `supabase/proposals/password-gate/grant-cleanup.sql` as written.
+- Effect: TRUNCATE, REFERENCES and TRIGGER removed from `anon` and `authenticated` on public tables and views; `anon` removed from `admin_audit_log`; `authenticated` lost INSERT, UPDATE and DELETE on `profiles_with_email`; postgres default privileges for new public tables no longer grant those three privileges to `anon` or `authenticated`. No app behaviour change is expected, because the app does not use these privileges.
+- Snapshot: `private.grant_cleanup_snapshot` holds the pre-change ACLs (350 rows). Rollback: `supabase/proposals/password-gate/grant-cleanup-rollback.sql`. It has not been run.
+- Not changed: `MAINTAIN` (not approved), service_role grants, RLS, policies, functions, profile column UPDATE grants.
+- Frontend and Edge Functions: unchanged in this step.

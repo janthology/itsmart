@@ -1,5 +1,6 @@
 -- Rollback for supabase/proposals/password-gate/grant-cleanup.sql (step 3.0).
--- PREPARED, NOT APPLIED. Run only with the same approval as the apply step.
+-- Ready for use. The apply step (migration 20261123181414) is live as of 2026-11-23.
+-- Run this only with a separate approval, and only after checking the snapshot.
 --
 -- Restores every relation and default-table privilege recorded in
 -- private.grant_cleanup_snapshot. Grants added after the apply are not removed.

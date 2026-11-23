@@ -1,6 +1,8 @@
 -- Trusted password gate, Phase 3 step 3.0: grant cleanup.
--- PREPARED, NOT APPLIED. Requires separate approval. Not in supabase/migrations
--- on purpose: it must not run as part of a normal migration sweep until approved.
+-- APPLIED to production on 2026-11-23 as migration 20261123181414
+-- password_gate_grant_cleanup, after the user approved it as written. The
+-- migration text matches this file except for the header. Kept here as the
+-- reviewed source. Rollback: grant-cleanup-rollback.sql (not yet run).
 --
 -- Why: live tables carry privileges the repository migrations never grant.
 -- Supabase default privileges give anon, authenticated and service_role every
