@@ -5,7 +5,7 @@ Status (2026-11-21): **migration `00023` applied and `csp-report` deployed to pr
 - Migration `00023` applied as live version `20261121161512 csp_violation_reports`. Repo file SHA-256 prefix `8f0e6df0…`, rollback `178416f3…`. History: 23 migrations.
 - `csp-report` deployed as v1, ACTIVE, `verify_jwt` false (function id `b543a6f8-82e2-47e5-9100-5a2bccdb1cd8`). Live source read back and matches the repo file.
 - Read-only and rolled-back checks: RLS on; only policy is `csp_violation_reports_read_admin`; `authenticated` SELECT only; `service_role` INSERT and sequence USAGE only; `anon` no table or sequence rights; `purge_csp_violation_reports()` is `SECURITY DEFINER` with `search_path=pg_catalog, public`, not executable by `anon`, `authenticated` or `service_role`. A rolled-back probe inserted one 100-day-old and one current row as `service_role`, then purged: 1 removed, 1 kept. The probe rolled back; live reports are 0.
-- **Synthetic check, 2026-11-21:** the user ran the curl and got an error (details not yet recorded). The database shows 0 reports, so nothing was stored. Vercel `report-uri` is **on hold** until the check passes.
+- **Synthetic check, 2026-10-28:** the user's `curl.exe` POST to `csp-report` returned **HTTP 204**, so the endpoint accepts reports. The earlier error was a missing `csp.json` file on the user's machine, not an endpoint fault. Vercel `report-uri` is **still on hold** until the user approves the `vercel.json` change and its promotion.
 - **Not verified:** a live POST through the gateway. The sandbox cannot reach `supabase.co` (TLS fails). See the synthetic test below.
 
 ## Why
