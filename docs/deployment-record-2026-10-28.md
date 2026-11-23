@@ -127,3 +127,11 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - Snapshot: `private.grant_cleanup_snapshot` holds the pre-change ACLs (350 rows). Rollback: `supabase/proposals/password-gate/grant-cleanup-rollback.sql`. It has not been run.
 - Not changed: `MAINTAIN` (not approved), service_role grants, RLS, policies, functions, profile column UPDATE grants.
 - Frontend and Edge Functions: unchanged in this step.
+
+## Update 2026-11-23: step 3.0 addendum applied (MAINTAIN, profile INSERT)
+
+- Migration `20261123182745 password_gate_grant_cleanup_addendum`, applied on the user's direction (MAINTAIN revoke; column INSERT on the flag columns revoke).
+- MAINTAIN removed from `anon` and `authenticated` on all public tables; the postgres default privileges no longer grant it to them.
+- `authenticated` lost table-level INSERT on `profiles` and has column INSERT on `id, full_name, role, department, avatar_url, created_at, updated_at, is_active` only. The two flag columns have no INSERT or UPDATE for `authenticated`.
+- Snapshot: `private.grant_cleanup_addendum_snapshot` (42 rows). Rollback: `supabase/proposals/password-gate/grant-cleanup-addendum-rollback.sql`, not run.
+- Open: `supabase_admin` default privileges for public tables still grant `arwdDxtm` to `anon` and `authenticated` (see the Phase 3 review).
