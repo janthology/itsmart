@@ -1,6 +1,6 @@
 # Trusted password gate, Phase 2: compatible handlers (review package)
 
-Status (2026-11-21): **built and tested locally, committed to the branch. NOT deployed.** Nothing in production has changed in this phase. Deploying the three Edge Functions and the frontend change needs your approval, and so do the signed-in tests (see "Decisions needed").
+Status (2026-10-28): **Edge Functions deployed to production; frontend preview built; production promotion and signed-in tests pending.** Deployed: `change-password` v2, `reset-password` v6, `create-user` v5 (all `verify_jwt` false, all ACTIVE). Source for each was read back from Supabase and matches `7cc9da1` (change-password checked in full; the other two were deployed from the same file contents and not re-read). Phase 1 gate RPCs (`password_gate_begin_change`, `password_gate_cancel_unattempted_change`, `password_gate_finish_change`, `password_gate_begin_reset`, `password_gate_finish_reset`) confirmed present in the live database, `(p_user uuid, p_operation uuid)`. `csp-report` was not changed.
 
 Phase 2 is defined in `docs/trusted-password-gate-review.md`: `change-password`, `reset-password` and `create-user` call the Phase 1 functions, and the frontend uses the server path only. Phase 1 (`20261101000024`, applied as `20261121174713`) is the prerequisite.
 
@@ -87,14 +87,30 @@ No other UI change. The app already forces flagged users to the change page (`Ap
 - The functions were tested with mocked fetch, not against live GoTrue, PostgREST or the database.
 - Real signed-in behaviour: concurrent admin resets and self-changes, old sessions after a reset, and the flag-first race. These need the dedicated accounts.
 
-## Deployment plan (not yet approved)
+## Deployment plan and record
 
-1. Edge Functions, `verify_jwt` false, as before: `change-password` (currently v1), `reset-password` (currently v5), `create-user` (currently v4). Deploy only after the stranded-account recovery decision.
+### Accepted risk (recorded 2026-10-28)
+
+The owner chose to deploy Phase 2 now, before Phase 4 recovery exists (the "Option B" above). Accepted: an account can be left in the `changing` or reset-locked state after a failed Auth step. Admin reset is refused for such accounts. Recovery is by direct database work, under the owner's direct approval, until Phase 4 is built. No retry or override is provided in the meantime.
+
+### Record
+
+- 2026-10-28: `change-password` v1 to v2, `reset-password` v5 to v6, `create-user` v4 to v5. Prior versions are rollback targets.
+- Frontend preview (Vercel `dpl_6fjeLyKmbNY62i6H3wdRr1gWuuuM`) built READY from `7cc9da1`.
+- Not yet done: production promotion of the frontend, signed-in tests on the three dedicated accounts.
+
+### Plan (as approved)
+
+1. Edge Functions, `verify_jwt` false: done (see Record).
 2. Frontend: the two small UI changes, through the normal Vercel preview and then production promotion, with the same approval as before.
 3. No new migration in this phase.
 4. Rollback: redeploy the previous function source (`git show d6689e4:supabase/functions/<name>/index.ts`) and the previous frontend deployment. Existing gate rows do not affect the old code, which never reads them.
 
-## Decisions needed
+## Decisions (resolved)
+
+1. **Deploy Phase 2 now, or first?** Resolved: deploy now (Option B).
+
+The original options are kept below for the record.
 
 1. **Deploy Phase 2 now, or first?** Option A: deploy after the Phase 4 recovery procedure is designed and tested, which is the safe default. Option B: deploy now and accept that admin reset is refused for accounts in the `changing` state, with recovery by direct database work.
 2. **Dedicated test accounts.** The three accounts you created (administrator, support, general user) can be used for the signed-in tests after deployment. Confirm they are the ones to use, and that no existing person's account is involved.
