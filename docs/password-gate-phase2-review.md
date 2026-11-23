@@ -1,6 +1,6 @@
 # Trusted password gate, Phase 2: compatible handlers (review package)
 
-Status (2026-10-28): **Edge Functions deployed to production; frontend promoted; signed-in tests reported passing by the user.** Deployed: `change-password` v2, `reset-password` v6, `create-user` v5 (all `verify_jwt` false, all ACTIVE). Source for each was read back from Supabase and matches `7cc9da1` (change-password checked in full; the other two were deployed from the same file contents and not re-read). Phase 1 gate RPCs (`password_gate_begin_change`, `password_gate_cancel_unattempted_change`, `password_gate_finish_change`, `password_gate_begin_reset`, `password_gate_finish_reset`) confirmed present in the live database, `(p_user uuid, p_operation uuid)`. `csp-report` was not changed.
+Status (2026-11-23): **Edge Functions deployed to production; frontend promoted; signed-in tests reported passing by the user.** Deployed: `change-password` v2, `reset-password` v6, `create-user` v5 (all `verify_jwt` false, all ACTIVE). Source for each was read back from Supabase and matches `7cc9da1` (change-password checked in full; the other two were deployed from the same file contents and not re-read). Phase 1 gate RPCs (`password_gate_begin_change`, `password_gate_cancel_unattempted_change`, `password_gate_finish_change`, `password_gate_begin_reset`, `password_gate_finish_reset`) confirmed present in the live database, `(p_user uuid, p_operation uuid)`. `csp-report` was not changed.
 
 Phase 2 is defined in `docs/trusted-password-gate-review.md`: `change-password`, `reset-password` and `create-user` call the Phase 1 functions, and the frontend uses the server path only. Phase 1 (`20261101000024`, applied as `20261121174713`) is the prerequisite.
 
@@ -89,17 +89,17 @@ No other UI change. The app already forces flagged users to the change page (`Ap
 
 ## Deployment plan and record
 
-### Accepted risk (recorded 2026-10-28)
+### Accepted risk (recorded 2026-11-23)
 
 The owner chose to deploy Phase 2 now, before Phase 4 recovery exists (the "Option B" above). Accepted: an account can be left in the `changing` or reset-locked state after a failed Auth step. Admin reset is refused for such accounts. Recovery is by direct database work, under the owner's direct approval, until Phase 4 is built. No retry or override is provided in the meantime.
 
 ### Record
 
-- 2026-10-28: `change-password` v1 to v2, `reset-password` v5 to v6, `create-user` v4 to v5. Prior versions are rollback targets.
+- 2026-11-23: `change-password` v1 to v2, `reset-password` v5 to v6, `create-user` v4 to v5. Prior versions are rollback targets.
 - Frontend preview (Vercel `dpl_6fjeLyKmbNY62i6H3wdRr1gWuuuM`) built READY from `7cc9da1`.
-- 2026-10-28: frontend promoted to production `dpl_6eWyTH5dkG4Qaqieqr4EM1Lipoo3` from `777fbff` (READY, aliased to `itsmart-dost02.vercel.app`).
-- 2026-10-28: the user reported that the signed-in tests on the three dedicated accounts (administrator, support, general user) passed. The agent did not run these itself. The sandbox cannot reach Supabase, and the user ran them in the browser.
-- 2026-10-28: favicon 404 fixed: `public/favicon.ico` added (DOST icon in an ICO container) and linked from `index.html`.
+- 2026-11-23: frontend promoted to production `dpl_6eWyTH5dkG4Qaqieqr4EM1Lipoo3` from `777fbff` (READY, aliased to `itsmart-dost02.vercel.app`).
+- 2026-11-23: the user reported that the signed-in tests on the three dedicated accounts (administrator, support, general user) passed. The agent did not run these itself. The sandbox cannot reach Supabase, and the user ran them in the browser.
+- 2026-11-23: favicon 404 fixed: `public/favicon.ico` added (DOST icon in an ICO container) and linked from `index.html`.
 
 ### Plan (as approved)
 

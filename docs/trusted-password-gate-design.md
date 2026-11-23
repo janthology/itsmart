@@ -48,7 +48,7 @@ The prior password-change Edge prototype also creates a temporary session for re
 
 ## Read-only production verification (2026-10-28)
 
-> **Superseded in part (2026-10-28, later check):** the column-grant finding below is no longer current. A later read-only catalog check shows `authenticated` has no UPDATE on `must_change_password` or `password_changed_at` (migration `20261101000022` is live). See `docs/password-gate-phase3-review.md`, section 2.
+> **Superseded in part (later check, 2026-11-23):** the column-grant finding below is no longer current. The claim above was accurate before migration `20261101000022` (`profile_password_flag_guard`, live as `20261121090050`). A later read-only catalog check shows `authenticated` has no UPDATE on `must_change_password` or `password_changed_at`; `information_schema.column_privileges` lists only SELECT, INSERT and REFERENCES on them, and no UPDATE. See `docs/password-gate-phase3-review.md`, section 2.
 
 A read-only catalog check of the live `profiles` table found that the current mandatory-password flag is client-editable:
 

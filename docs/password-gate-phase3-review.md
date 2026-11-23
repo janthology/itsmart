@@ -1,6 +1,6 @@
 # Trusted password gate, Phase 3: enforcement (review package, not applied)
 
-Status (2026-10-28): **document only. Nothing in this package has been applied, deployed, or approved.** No production object was changed. The live checks below were read-only catalog queries on `rkwxdqludtdzbpuftsvi`. Phase 3 is the first step that changes what users can read and write, so it needs the decisions in "Decisions needed" before any SQL is written for production.
+Status (2026-11-23): **document only. Nothing in this package has been applied, deployed, or approved.** No production object was changed. The live checks below were read-only catalog queries on `rkwxdqludtdzbpuftsvi`. Phase 3 is the first step that changes what users can read and write, so it needs the decisions in "Decisions needed" before any SQL is written for production.
 
 Parent documents: `docs/trusted-password-gate-review.md` (phases), `docs/trusted-password-gate-design.md` (requirements), `docs/password-gate-phase1-review.md` (applied infrastructure), `docs/password-gate-phase2-review.md` (deployed handlers).
 
@@ -16,11 +16,11 @@ Enforcement needs three things that do not exist yet:
 
 The recommended order is: a grant cleanup first, then the admission login path in shadow mode (record what would be denied, enforce nothing), then enforcement behind a switch that can be flipped back without a deploy.
 
-## 2. Live state verified on 2026-10-28 (read-only)
+## 2. Live state verified on 2026-11-23 (read-only)
 
 | Check | Result | Consequence |
 | --- | --- | --- |
-| `profiles` column grants for `authenticated` | UPDATE only on `department`, `full_name`, `is_active`, `role`. **No** UPDATE on `must_change_password` or `password_changed_at`. | Migration `20261101000022` is live. A signed-in user cannot clear their own flag through the Data API. **This corrects** the 2026-10-28 note in `trusted-password-gate-design.md`, which said `authenticated` held those UPDATE grants. That note is superseded. Re-verify before each change. |
+| `profiles` column grants for `authenticated` | UPDATE only on `department`, `full_name`, `is_active`, `role`. **No** UPDATE on `must_change_password` or `password_changed_at`. | Migration `20261101000022` is live. A signed-in user cannot clear their own flag through the Data API. **This corrects** the 2026-11-23 note in `trusted-password-gate-design.md`, which said `authenticated` held those UPDATE grants. That note is superseded. Re-verify before each change. |
 | `profiles` row policy `profiles_update_self_or_admin` | Allows an active user to update their own row, subject to the column grants and `guard_profile_update`. | Acceptable for now. Re-check after enforcement. |
 | `get_my_role()` | SECURITY DEFINER. Returns the role when `is_active = true`. No gate check. `anon` has EXECUTE. | Every helper-based policy stays open to a flagged user. |
 | `is_active_user()` | SECURITY DEFINER. Returns `is_active`. No gate check. `anon` has EXECUTE. | Same as above. Returns false for `anon`, so the `anon` grant is harmless in itself. |
@@ -124,6 +124,29 @@ No policy exemption. The retained administrator signs in through the broker like
 
 This step does not change behaviour for the app, because the app does not use TRUNCATE, REFERENCES or TRIGGER through the Data API. Verify that no migration or trigger relies on those grants before applying.
 
+**Step 3.0 package (prepared 2026-11-23, not applied):**
+
+- `supabase/proposals/password-gate/grant-cleanup.sql`: snapshot of relation, column and default ACLs into `private.grant_cleanup_snapshot` before any change; then the revokes; then a check that fails the script if anything remains.
+- `supabase/proposals/password-gate/grant-cleanup-rollback.sql`: restores every snapshotted grant and default privilege, then drops the snapshot table. It refuses to run without a snapshot.
+- `artifacts/itam/src/lib/grant-cleanup.local.test.ts`: applies every repository migration in PGlite, recreates the live drift (below), applies the cleanup, and checks privileges, app writes, TRUNCATE denial, anon denial on `admin_audit_log`, future tables, the exact rollback, re-apply, and the refusal without a snapshot. 11 tests pass. This is a local PostgreSQL, not live Supabase.
+- The package is in `supabase/proposals/`, not `supabase/migrations/`, so no migration sweep can apply it by accident.
+
+**Why the test recreates the drift.** The repository migrations grant only SELECT, INSERT, UPDATE and DELETE (`20261028000002`). Live tables show TRUNCATE, REFERENCES, TRIGGER and MAINTAIN for `anon` or `authenticated`, which is what Supabase default privileges produce. PGlite has no such defaults, so the test copies the live catalog shape into the database before testing the cleanup.
+
+**Extra changes beyond section 4.8, for your approval:**
+
+1. `profiles_with_email`: revoke INSERT, UPDATE and DELETE from `authenticated`. The frontend only reads this view, and the view is not auto-updatable anyway.
+2. Default privileges: `ALTER DEFAULT PRIVILEGES FOR ROLE postgres` in `public`, so new tables do not regain TRUNCATE, REFERENCES or TRIGGER for `anon` and `authenticated`. Without this, the cleanup does not last.
+3. Column-level REFERENCES: a table-level REVOKE removes it too (PGlite-checked). The apply script also fails if any remains.
+
+**Not in this package, and open:**
+
+- `MAINTAIN` (PostgreSQL 17) is granted to `authenticated` on the business tables. It allows VACUUM, ANALYZE and LOCK TABLE, but not row access. It is not in section 4.8. Recommended: add it, with your decision.
+- Column-level ACLs on other public tables are not verified live. The Supabase API returned 502 on the two attempts to query `pg_attribute.attacl`. The snapshot captures them anyway, so the rollback is complete whatever the live check shows.
+- `authenticated` still has column INSERT on `must_change_password` and `password_changed_at`, through the table-level INSERT grant. Revoking it would need the table INSERT replaced with an explicit column list. Not changed here. The risk is low: a locked account has an existing profile row, and DELETE on `profiles` is denied by RLS.
+- `csp_violation_reports` grants SELECT to `authenticated`. RLS decides who can read it. Not reviewed here.
+- Storage policies are still uninventoried (D8).
+
 ### 4.9 Shadow mode and enforcement switch
 
 - A service-only setting (a row in a new `password_gate_settings` table, or an equivalent) selects `shadow` or `enforce`.
@@ -205,4 +228,4 @@ Each signed-in test that writes creates or changes data, so it needs approval an
 
 ## 11. Next step
 
-On your answers to D1 to D8, the next package will contain: the step 3.0 grant SQL and rollback, the step 3.1 schema SQL and rollback, the helper and policy changes for step 3.4, the broker login changes for step 3.2, and the disposable-PostgreSQL test results for each. Nothing will be applied to production without a separate approval.
+Decisions D1 to D8 were accepted on 2026-11-23. The step 3.0 package is written and tested locally (section 4.8). Before anything reaches production, it needs your approval of its SQL and rollback, and of the three extra changes listed there, including the decision on `MAINTAIN`. After that, the next packages are step 3.1 (schema), step 3.4 (helpers and policies), and step 3.2 (broker login). Each one needs its own SQL, rollback, local test and approval. Nothing is applied to production without a separate approval.
