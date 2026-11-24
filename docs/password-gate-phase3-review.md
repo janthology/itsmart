@@ -625,3 +625,21 @@ The app change for these is a separate piece of work, and the open decision from
 This matches the decisions: all tickets, no assets except those assigned to the user (none here), all profiles, and only its own notifications.
 
 **Still to run.** The role-matrix script without `USER_FLAGGED`, for the live browser/broker run. The restricted (flagged) rows need usertest flagged again, which is a production write and needs approval.
+
+## 27. usertest flagged again (approved); restricted rows checked on production (2026-11-24)
+
+**Flag (approved by the user).** `usertest@gmail.com` moved from `cleared` to `required` under a new operation ID; admitted sessions removed (0); `must_change_password` true. The account needs a password change in the app before the full general-user rows can run again.
+
+**Restricted rows (rolled-back probes, production, as `authenticated` with claims).**
+
+| Session | Tickets | Assets | Notifications | Profiles |
+| --- | --- | --- | --- | --- |
+| No admitted session | 0 | 0 | 0 | 1 (own) |
+| Restricted admitted session (`password_change_only`) | 0 | 0 | 0 | 1 (own) |
+
+**Role-matrix script, live run: not done by the assistant.** The sandbox cannot reach the Supabase project (HTTP `000`, checked again). The restricted run needs the user's machine, with `USER_FLAGGED=1`.
+
+**Order for the remaining live run.**
+1. Run the script with `USER_FLAGGED=1` (restricted rows).
+2. usertest completes a password change in the app. This clears the flag.
+3. Run the script without `USER_FLAGGED`, with the new password (full general-user rows).
