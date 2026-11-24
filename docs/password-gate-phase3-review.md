@@ -367,3 +367,31 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 - **Explicit approval for the flip.** Not given. The user's approval list covered Phase 4 and D3, not the flip.
 - **Rate limiting and lockout (3.2, item 5).** Open. Not a live check. Needs a decision.
 - **`register()` in `artifacts/itam/src/lib/auth-context.tsx`.** Still calls `supabase.auth.signUp`. No component calls it, and `/register` redirects to `/login`. Signup is disabled at GoTrue, so this cannot create an account today. Recommended: remove it in a separate change, to match the standing rule above.
+
+## 16. Step 3.4 enforce applied to production (2026-11-24)
+
+**User approval:** "i approve to apply the enforce flip" (after the readiness list in section 14 and section 15 was shown). Also: remove `register()`.
+
+**Code.** `register()` removed from `artifacts/itam/src/lib/auth-context.tsx` (commit `639db96`, from the context type, the function, and the provider value). `/register` remains a redirect to `/login`. Typecheck clean; the itam suite passed (38 files, 389 tests). **The production build still contains the old code until a new production deployment is promoted from `639db96`. That promotion is not done and needs its own approval.**
+
+**Pre-flip snapshot (2026-11-24 04:19:08 UTC).** Mode `shadow`. Gate rows: `cleared=15`. Profiles without a gate row: 0. `auth.sessions`: 0. Admitted rows: 0. Storage: 0 buckets, 0 objects, 0 policies (D8). Restrictive policies `password_gate_scope`: 11. Shadow log rows: 0.
+
+**The flip.** `UPDATE public.password_gate_settings SET mode = 'enforce', updated_at = clock_timestamp() WHERE id = 1;` Read back at 04:19:13 UTC: `mode = enforce`, shadow log rows 0.
+
+**Post-flip probe (rolled back, no data changed).** The probe ran as the `authenticated` role with the `admintest` user ID and no admitted session:
+
+- `get_my_role()` returns NULL.
+- `is_active_user()` returns false.
+- `password_gate_scope_ok()` returns false.
+- `tickets` visible: 0.
+- `profiles` visible: 1 (the caller's own row, the self-read carve-out).
+
+**Rollback (first step, per section 6).** `UPDATE public.password_gate_settings SET mode = 'shadow', updated_at = clock_timestamp() WHERE id = 1;`
+
+**Still open after the flip:**
+
+1. **Signed-in role matrix (section 7).** Not run. Run it now on the three dedicated accounts. Any write needs approval.
+2. **Realtime check (4.7).** Not run. Subscribe as a restricted or unadmitted session to `notifications` and `profiles`, and confirm no business events arrive.
+3. **Rate limiting and lockout (3.2).** Open. Not in the broker function.
+4. **Production build of the `register()` removal.** Not promoted.
+5. **Sign-ins from the broker.** Any session created outside the broker is denied from now on. Sessions were 0 at the flip, so nothing was cut off.
