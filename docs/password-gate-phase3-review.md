@@ -611,3 +611,17 @@ The app change for these is a separate piece of work, and the open decision from
 - Tickets: unchanged.
 
 **Rollback** (if the decision is withdrawn): `supabase/rollbacks/20261124064640_password_gate_visibility_scope.sql`.
+
+## 26. usertest password change completed; general-user full session checked on production (2026-11-24)
+
+**Password change.** `usertest@gmail.com` completed the password change at 07:03:07 UTC. Afterwards the gate phase is `cleared` and `must_change_password` is false (read-only check). The earlier change at 05:27:44 UTC was before the re-flag, so it did not clear the flag; the 06:28 re-flag needed this second change.
+
+**General user, full session (rolled-back probe, production, after migration `20261124064640`).** Run as `authenticated` with a temporary admitted session, then rolled back.
+
+| Subject | Tickets | Other users' tickets | Assets | Profiles | Own notifications |
+| --- | --- | --- | --- | --- | --- |
+| General user (`usertest`), full | 27 | 27 | 0 (none assigned to it) | 15 | 3 |
+
+This matches the decisions: all tickets, no assets except those assigned to the user (none here), all profiles, and only its own notifications.
+
+**Still to run.** The role-matrix script without `USER_FLAGGED`, for the live browser/broker run. The restricted (flagged) rows need usertest flagged again, which is a production write and needs approval.
