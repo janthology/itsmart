@@ -414,3 +414,32 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 - Role matrix: `artifacts/itam/scripts/password-gate-signed-in-check.mjs`. It signs in the three dedicated accounts through the broker and checks each row of section 7 that can be checked by reading: admin, support, general user, unadmitted direct sign-in, anon, and a wrong password. `--lockout` also runs the lockout check, which locks the general test account for 15 minutes. It only reads, and it prints no passwords or tokens. It was checked against a local mock of the API (13 checks pass in the mock, including the unadmitted case that must fail if enforcement is broken). It has not been run against live.
 - Still needed from you: run the script with the three accounts' credentials. The restricted-session rows of section 7 need a flagged dedicated account, and flagging one is a production write that needs approval.
 - Realtime check (4.7): not run. It needs a Realtime client subscribed as a session that has no business access, to `notifications` and `profiles`, while a business row changes. Expected: no business events reach a restricted or unadmitted session. The positive control is a full session receiving its own notification. It also needs a flagged dedicated account.
+
+## 18. Flagged test account; role matrix (database layer run, live browser run pending) (2026-11-24)
+
+**Flag applied (approved by the user).** `usertest@gmail.com` (`general_user`, dedicated test account) was flagged in production: `password_gate_state.phase` `cleared` → `required` under a new operation ID, `profiles.must_change_password` set to true, and its admitted-session rows removed (there were none). Nothing else changed. Mode stays `enforce`. It is the only account in `required`. To restore it, the user completes the password change in the app; the change path then sets `cleared` and a new generation.
+
+**Live check from the assistant: not possible.** The sandbox cannot reach Supabase or the preview (HTTP `000`, checked again). The assistant does not hold the dedicated accounts' passwords.
+
+**Database-layer role matrix, run live and rolled back (2026-11-24).** Each probe ran as the `authenticated` role with a claim set, inside a block that always raised, so nothing was committed. The probe sessions and admitted rows were removed by the rollback (checked: 0 remain).
+
+| Subject | Session | Tickets | Assets | Notifications | Profiles | Own-profile update |
+| --- | --- | --- | --- | --- | --- | --- |
+| Administrator (`admintest`) | full, admitted | 27 | 26 | 3 | 15 | n/a |
+| General user (`usertest`), flagged | restricted, admitted | 0 | 0 | 0 | 1 (own) | 0 rows |
+| General user (`usertest`), flagged | no session | 0 | 0 | 0 | 1 (own) | n/a |
+| Administrator (`admintest`) | none | 0 | 0 | 0 | 0 | n/a |
+| anon | none | 0 | 0 | 0 | 0 | n/a |
+
+Not covered by this table: the general user with a full session (`usertest` is flagged, so this needs the password change first); the maintenance-RPC and ticket-create denials (not exercised, to avoid writes); the Realtime rows.
+
+**Signed-in matrix, to run on your machine (required).** The script is `artifacts/itam/scripts/password-gate-signed-in-check.mjs`. Run it from a machine that can reach the project:
+
+1. While `usertest` is flagged: `SUPABASE_URL=... SUPABASE_ANON_KEY=... ADMIN_EMAIL=admintest@gmail.com ADMIN_PASSWORD=... SUPPORT_EMAIL=supporttest@gmail.com SUPPORT_PASSWORD=... USER_EMAIL=usertest@gmail.com USER_PASSWORD=... USER_FLAGGED=1 node artifacts/itam/scripts/password-gate-signed-in-check.mjs`
+2. Complete the password change for `usertest` in the app on the preview.
+3. Run again with `USER_FLAGGED` unset and `USER_PASSWORD` set to the new password. This covers "after change: full access under the new generation" and the general-user rows.
+4. Optional, locks `usertest` for 15 minutes: add `--lockout` to either run.
+
+Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off on a FAIL.
+
+**Realtime check (4.7): still not run.** It needs a Realtime subscription as the flagged `usertest` session (restricted), to `notifications` and `profiles`, while a business row changes. Expected: no business events. The positive control is a full session receiving its own notification. Send the results, and this becomes the next item.

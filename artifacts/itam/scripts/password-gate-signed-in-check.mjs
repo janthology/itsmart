@@ -9,7 +9,11 @@
 //   SUPPORT_EMAIL, SUPPORT_PASSWORD    (support_staff, supporttest)
 //   USER_EMAIL, USER_PASSWORD          (general_user, usertest)
 // Optional:
-//   --lockout   also sends 5 wrong passwords for USER_EMAIL to check the lockout (locks that account 15 minutes)
+//   USER_FLAGGED=1  USER_EMAIL is currently flagged (phase required, must change password). The
+//                   general-user rows then expect a RESTRICTED session. Run once flagged, then once
+//                   after the user has completed the password change in the app (leave USER_FLAGGED unset,
+//                   and set USER_PASSWORD to the new password).
+//   --lockout       also sends 5 wrong passwords for USER_EMAIL to check the lockout (locks that account 15 minutes)
 //
 // It only reads. It prints PASS, FAIL or NOTE for each check. Expected results are in the comments.
 // No password or token is printed.
@@ -26,6 +30,7 @@ if (!base || !anon || Object.values(accounts).some(a => !a.email || !a.password)
   process.exit(2);
 }
 const runLockout = process.argv.includes('--lockout');
+const userFlagged = process.env.USER_FLAGGED === '1';
 
 let failures = 0;
 const results = [];
@@ -48,6 +53,16 @@ async function broker(email, password) {
   try { body = await r.json(); } catch { /* empty */ }
   return { status: r.status, body };
 }
+async function patch(path, token, body) {
+  const r = await fetch(`${base}/rest/v1/${path}`, {
+    method: 'PATCH',
+    headers: { apikey: anon, Authorization: `Bearer ${token}`, 'content-type': 'application/json', Prefer: 'return=representation' },
+    body: JSON.stringify(body),
+  });
+  let out = null;
+  try { out = await r.json(); } catch { /* empty */ }
+  return { status: r.status, body: out };
+}
 async function rest(path, token) {
   const r = await fetch(`${base}/rest/v1/${path}`, {
     headers: { apikey: anon, Authorization: `Bearer ${token ?? anon}` },
@@ -63,7 +78,8 @@ for (const [role, account] of Object.entries(accounts)) {
   const r = await broker(account.email, account.password);
   if (r.status === 200 && typeof r.body.access_token === 'string') {
     tokens[role] = r.body.access_token;
-    report('PASS', `${role}: broker sign-in returns tokens`, `password_change_required=${r.body.password_change_required}`);
+    const expectChange = role === 'user' ? userFlagged : false;
+    report(r.body.password_change_required === expectChange ? 'PASS' : 'FAIL', `${role}: broker sign-in returns tokens`, `password_change_required=${r.body.password_change_required}, expected ${expectChange}`);
   } else {
     report('FAIL', `${role}: broker sign-in returns tokens`, `status ${r.status} ${r.body.code ?? ''}`);
   }
@@ -85,8 +101,8 @@ if (tokens.support) {
   report(a.status === 200 && Array.isArray(a.body) ? 'PASS' : 'FAIL', 'support: reads assets', `status ${a.status}`);
 }
 
-// 3. General user: own tickets only. Expect every returned ticket to be created by this user.
-if (tokens.user) {
+// 3. General user. Full-scope: own tickets only. Flagged: restricted, no business rows, own profile only.
+if (tokens.user && !userFlagged) {
   const me = claimsOf(tokens.user).sub;
   const t = await rest('tickets?select=id,created_by&limit=50', tokens.user);
   const others = Array.isArray(t.body) ? t.body.filter(x => x.created_by !== me).length : -1;
@@ -95,6 +111,18 @@ if (tokens.user) {
   report(pr.status === 200 && Array.isArray(pr.body) && pr.body.length === 1 ? 'PASS' : 'FAIL', 'general user: reads own profile only', `rows ${Array.isArray(pr.body) ? pr.body.length : 'n/a'}`);
   const others2 = await rest('profiles?select=id', tokens.user);
   report(others2.status === 200 && Array.isArray(others2.body) && others2.body.length === 1 ? 'PASS' : 'FAIL', 'general user: other profiles not visible', `rows ${Array.isArray(others2.body) ? others2.body.length : 'n/a'}`);
+}
+if (tokens.user && userFlagged) {
+  const me = claimsOf(tokens.user).sub;
+  for (const path of ['tickets?select=id&limit=5', 'assets?select=id&limit=5', 'notifications?select=id&limit=5']) {
+    const t = await rest(path, tokens.user);
+    report(t.status === 200 && Array.isArray(t.body) && t.body.length === 0 ? 'PASS' : 'FAIL', `restricted: ${path.split('?')[0]} denied`, `status ${t.status}, rows ${Array.isArray(t.body) ? t.body.length : 'n/a'}`);
+  }
+  const all = await rest('profiles?select=id,full_name', tokens.user);
+  report(all.status === 200 && Array.isArray(all.body) && all.body.length === 1 && all.body[0].id === me ? 'PASS' : 'FAIL', 'restricted: only own profile visible', `rows ${Array.isArray(all.body) ? all.body.length : 'n/a'}`);
+  // Writes the current name back, so a wrongly allowed update changes nothing.
+  const w = await patch(`profiles?id=eq.${me}`, tokens.user, { full_name: all.body?.[0]?.full_name ?? null });
+  report(w.status >= 400 || (Array.isArray(w.body) && w.body.length === 0) ? 'PASS' : 'FAIL', 'restricted: direct update of own profile refused', `status ${w.status}, rows changed ${Array.isArray(w.body) ? w.body.length : 'n/a'}`);
 }
 
 // 4. Unadmitted session: a password grant made directly, without the broker. Expect no business rows.
