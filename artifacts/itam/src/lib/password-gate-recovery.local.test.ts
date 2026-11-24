@@ -4,14 +4,13 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { readdirSync, readFileSync } from 'node:fs';
 
-// Trusted password gate, Phase 4 proposal (supabase/proposals/password-gate/phase4-recovery.sql).
-// Applies every repository migration, then the proposal, to a synthetic local PostgreSQL. It checks the
+// Trusted password gate, Phase 4 (migration 20261124041419).
+// Applies every repository migration, in order, to a synthetic local PostgreSQL. It checks the
 // database contract only: which states are recoverable, the quiet period, stale expectations, the admin
 // reset path afterwards, log privacy and rollback. It is not GoTrue or PostgREST, and it does not prove
 // that a stranded account's Auth password is correct: that is the operator's check.
 const migrationsDir = new URL('../../../../supabase/migrations/', import.meta.url);
-const proposal = new URL('../../../../supabase/proposals/password-gate/phase4-recovery.sql', import.meta.url);
-const rollback = new URL('../../../../supabase/proposals/password-gate/phase4-recovery-rollback.sql', import.meta.url);
+const rollback = new URL('../../../../supabase/rollbacks/20261124041419_password_gate_recovery.sql', import.meta.url);
 const admin = '00000000-0000-4000-8000-000000000001';
 const general = '00000000-0000-4000-8000-000000000002';
 const session = '00000000-0000-4000-8000-000000000003';
@@ -74,11 +73,10 @@ beforeAll(async () => {
     UPDATE profiles SET role='administrator' WHERE id='${admin}';
     INSERT INTO auth.sessions(id,user_id,created_at) VALUES ('${session}','${general}', now() - interval '2 hours');
   `);
-  await db.exec(readFileSync(proposal, 'utf8'));
 }, 60000);
 afterAll(async () => { if (db) await db.close(); });
 
-describe('password gate Phase 4 recovery proposal', () => {
+describe('password gate Phase 4 recovery', () => {
   it('cannot be executed by PUBLIC, anon or authenticated; only service_role', async () => {
     await asPostgres();
     for (const role of ['anon', 'authenticated']) {
