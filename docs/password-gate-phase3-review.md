@@ -268,3 +268,28 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 - Realtime delivery (4.7) is not tested. It needs the dedicated accounts, at 3.4.
 - Local tests use PGlite, not GoTrue or PostgREST. The `session_id` claim in live tokens is still unverified (section 4.1), so verify it on a dedicated account before 3.4.
 - The test environment's `pnpm-lock.yaml` does not match the workspace `overrides` (the frozen install fails). The lockfile was not changed in the repository. Installing without the frozen flag gave working tests.
+
+## 13. Step 3.2 (broker login) deployed to Supabase; frontend on a preview, not promoted (2026-11-24)
+
+**What is live.**
+
+- Edge Function `login-broker` (slug `login-broker`, id `02114116-f161-4f74-87d5-b0639be17c81`, project `rkwxdqludtdzbpuftsvi`), `verify_jwt=false`, status ACTIVE, version 1. The read-back body matches `supabase/functions/login-broker/index.ts` at commit `68000a0`.
+- Frontend commit `68000a0`, pushed. Preview `dpl_EAYXzuGHpzynKb7FHQA7Uv47drrn` is READY at `itsmart-dost02-hi7lh42o1-theneilcruz-gmailcoms-projects.vercel.app`. It is not promoted; production `itsmart-dost02.vercel.app` still runs the previous build and still signs in directly.
+- Live endpoint behaviour from the sandbox could not be checked, because the sandbox cannot reach Supabase.
+
+**What changed in the code.**
+
+- `login-broker`: an inactive profile, checked after a verified password, now returns `403 account_unavailable` (it returned `401 login_failed` in the draft). Every other refusal is unchanged.
+- `auth-context.tsx` `login()`: calls the broker and installs the session with `setSession`. A `password_change_required` answer routes to `/change-password` and sets the mandatory-change flag. The existing inactive and must-change checks still run.
+- `lib/login-broker.ts`: maps broker codes to messages. `invalid_input` asks for both fields, `login_failed` gives the invalid-credentials text, `account_unavailable` gives "Account unavailable", and everything else gives the temporary-unavailable text. `login.tsx` maps "account unavailable" to a contact-the-administrator message.
+- Tests: `login-broker-edge.test.ts` (16, the real function source with mocked GoTrue and REST), `login-broker.test.ts` (6, client). Full itam suite 36 files / 368 tests; `tsc --noEmit` exit 0.
+
+**Still open before step 3.2 is complete.**
+
+1. **Live `session_id` claim (section 4.1).** The broker refuses any token without a UUID `session_id`. If the live token lacks the claim, every sign-in fails closed with `login_failed`. Check this on the first dedicated-account sign-in.
+2. **Rate limiting and lockout** are not in the function. GoTrue applies them only in part. Recorded as open in the function header.
+3. **Signed-in test on live** for these accounts, on the preview: a `cleared` full session; a `required` or `changing` restricted session that reaches `/change-password` and is blocked from other routes; a `resetting` account refused with 403. The user must run these. They use dedicated accounts only, and no test runs on the retained administrator (D4).
+4. **Promotion of the preview to production** is a separate approval. Until then the broker is deployed but unused.
+5. **The restricted session must be able to complete the password change.** `change-password` (`9f58af79`) was not changed and was not re-tested against a restricted session. Test it in step 3.
+
+**Step 3.4 (enforce)** stays blocked until section 5's eight prerequisites hold and the user approves that apply separately. Step 3.2 completion is one of them.

@@ -149,3 +149,9 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - Step 3.2a, migration `20261124020959 password_gate_backfill_cleared`: gate rows for 14 profiles that had none (all `cleared`). Rollback `supabase/proposals/password-gate/gate-backfill-cleared-rollback.sql`, not run.
 - Step 3.3, migration `20261124021030 password_gate_enforcement_step33`: gate-aware `get_my_role` and `is_active_user`, new helpers, 11 restrictive scope policies plus the `profiles` policy. Settings left at `shadow`, so nothing is denied. Rollback `supabase/proposals/password-gate/enforcement-step33-rollback.sql`, not run.
 - Live checks passed (read-only). Enforcement is not on. Step 3.4 (enforce) needs step 3.2 (broker frontend) first and its own approval.
+
+## Update 2026-11-24: step 3.2 broker deployed; frontend preview only
+
+- Supabase Edge Function `login-broker` deployed to `rkwxdqludtdzbpuftsvi`, `verify_jwt=false`, ACTIVE, id `02114116-f161-4f74-87d5-b0639be17c81`. Source commit `68000a0`.
+- Vercel preview `dpl_EAYXzuGHpzynKb7FHQA7Uv47drrn` (commit `68000a0`) READY. Not promoted. Production still runs `dpl_EqdwEmFji1iMNbxBQepQfeeFB8gY`.
+- Not yet verified live: sign-in through the broker, the restricted-session flow, and the `session_id` claim. Details and the open list are in `docs/password-gate-phase3-review.md` section 13.
