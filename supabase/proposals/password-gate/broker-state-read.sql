@@ -1,5 +1,5 @@
 -- Trusted password gate, Phase 3 step 3.2 fix: service-only read of gate state for the broker.
--- STATUS: DRAFTED, NOT APPLIED. Needs the user's approval before production (one approval per apply).
+-- APPLIED to production as migration 20261124032732 (approved by the user, 2026-11-24).
 -- Rollback: supabase/proposals/password-gate/broker-state-read-rollback.sql
 --
 -- Why: Phase 1 (migration 20261101000024) revoked every privilege on password_gate_state from

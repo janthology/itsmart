@@ -4,13 +4,11 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { readdirSync, readFileSync } from 'node:fs';
 
-// Step 3.2 fix: password_gate_broker_state (proposal). Local PGlite only, not live.
-// Applies every repository migration, then the proposal, as the same harness as step 3.1.
+// Step 3.2 fix: password_gate_broker_state. Local PGlite only, not live.
+// Applies every repository migration (including 20261124032732), as the step 3.1 harness does.
 
 const migrationsDir = new URL('../../../../supabase/migrations/', import.meta.url);
-const proposalsDir = new URL('../../../../supabase/proposals/password-gate/', import.meta.url);
 const script = (name: string) => readFileSync(new URL(name, migrationsDir), 'utf8');
-const proposal = (name: string) => readFileSync(new URL(name, proposalsDir), 'utf8');
 
 const admin = '00000000-0000-4000-8000-000000000001';
 const general = '00000000-0000-4000-8000-000000000002';
@@ -65,7 +63,7 @@ beforeAll(async () => {
   `);
   // The state row for the general user is the only one that matters for the phase checks.
   await db.exec(`INSERT INTO password_gate_state(user_id, phase, operation_id) VALUES ('${general}','required','${gen}') ON CONFLICT (user_id) DO NOTHING`);
-  await db.exec(proposal('broker-state-read.sql'));
+  // The function comes from migration 20261124032732 (applied above), so the proposal is not run again.
 });
 
 afterAll(async () => { await db?.close(); });
