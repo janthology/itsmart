@@ -12,7 +12,7 @@
 //      session out (scope local), so no unadmitted token is returned.
 // The database re-checks the generation under a row lock during admission, so a reset
 // that starts at any point before admission makes the admission fail.
-// Per-account lockout (migration 20261124044000): 5 wrong passwords in 15 minutes lock the
+// Per-account lockout (migration 20261124051703): 5 wrong passwords in 15 minutes lock the
 // email for 15 minutes. The lock is checked before the password goes to GoTrue, so a locked
 // email gets 429 even with the right password. The throttle key is a hash of the email.
 // If the throttle check itself fails, sign-in fails closed (503). Never log or return

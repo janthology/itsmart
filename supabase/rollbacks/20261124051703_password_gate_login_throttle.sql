@@ -1,4 +1,4 @@
--- Rollback for supabase/migrations/20261124044000_password_gate_login_throttle.sql.
+-- Rollback for supabase/migrations/20261124051703_password_gate_login_throttle.sql.
 -- Only safe after the broker that calls these functions is redeployed without the throttle.
 -- Dropping the table removes every counter and lock.
 DROP FUNCTION IF EXISTS public.password_gate_login_check(text);

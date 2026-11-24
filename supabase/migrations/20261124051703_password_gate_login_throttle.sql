@@ -14,7 +14,7 @@
 --
 -- Service-only, like the rest of the gate: RLS on with no policies, no privilege for
 -- PUBLIC, anon, authenticated or service_role on the table, and EXECUTE on the three
--- functions only for service_role. Rollback: supabase/rollbacks/20261124044000_password_gate_login_throttle.sql.
+-- functions only for service_role. Rollback: supabase/rollbacks/20261124051703_password_gate_login_throttle.sql.
 
 CREATE TABLE public.password_gate_login_throttle (
   throttle_key text PRIMARY KEY CHECK (throttle_key ~ '^[0-9a-f]{64}$'),

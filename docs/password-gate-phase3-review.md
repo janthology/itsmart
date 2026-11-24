@@ -400,7 +400,7 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 
 **Rate limiting and lockout: built, tested locally, not applied to production.**
 
-- Migration `supabase/migrations/20261124044000_password_gate_login_throttle.sql` (service-only table `password_gate_login_throttle`, functions `password_gate_login_check`, `password_gate_login_failed`, `password_gate_login_succeeded`). Rollback: `supabase/rollbacks/20261124044000_password_gate_login_throttle.sql`.
+- Migration `supabase/migrations/20261124051703_password_gate_login_throttle.sql` (service-only table `password_gate_login_throttle`, functions `password_gate_login_check`, `password_gate_login_failed`, `password_gate_login_succeeded`). Rollback: `supabase/rollbacks/20261124051703_password_gate_login_throttle.sql`.
 - Rules: 5 wrong passwords in 15 minutes lock the email for 15 minutes. The lock is checked before the password goes to GoTrue, so a locked email gets 429 with `retry_after`, even with the right password. A correct password clears the count. After a lock expires, the count starts again. Keys are SHA-256 of `login:` + the lowercased, trimmed email. No email is stored or sent to the throttle.
 - `login-broker` (source updated, **not deployed**): the lock check runs first and fails closed (503) on any error or any reply that is not a whole number. Failed passwords are counted. A GoTrue 5xx is not counted.
 - Browser (`artifacts/itam/src/lib/login-broker.ts`): 429 `too_many_attempts` shows "Too many sign-in attempts. Wait a few minutes and try again." It needs a production frontend promotion.

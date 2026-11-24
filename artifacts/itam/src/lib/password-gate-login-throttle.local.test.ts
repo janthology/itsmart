@@ -4,11 +4,11 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { readdirSync, readFileSync } from 'node:fs';
 
-// Login throttle (migration 20261124044000), applied after every repository migration on a
+// Login throttle (migration 20261124051703), applied after every repository migration on a
 // synthetic local PostgreSQL. Covers the counter, the lock, expiry, the window, key validation,
 // privileges and the rollback. The broker's use of it is tested in login-broker-edge.test.ts.
 const migrationsDir = new URL('../../../../supabase/migrations/', import.meta.url);
-const rollbackFile = new URL('../../../../supabase/rollbacks/20261124044000_password_gate_login_throttle.sql', import.meta.url);
+const rollbackFile = new URL('../../../../supabase/rollbacks/20261124051703_password_gate_login_throttle.sql', import.meta.url);
 const keyA = 'a'.repeat(64);
 const keyB = 'b'.repeat(64);
 
@@ -150,7 +150,7 @@ describe('login throttle: input, privileges and rollback', () => {
     await db.exec(readFileSync(rollbackFile, 'utf8'));
     const left = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM pg_proc WHERE proname LIKE 'password_gate_login_%'");
     expect(left.rows[0].n).toBe(0);
-    await db.exec(readFileSync(new URL('20261124044000_password_gate_login_throttle.sql', migrationsDir), 'utf8'));
+    await db.exec(readFileSync(new URL('20261124051703_password_gate_login_throttle.sql', migrationsDir), 'utf8'));
     expect(Number(await check(keyA))).toBe(0);
     expect(await failed(keyA)).toBe(0);
   });
