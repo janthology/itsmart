@@ -658,3 +658,15 @@ This matches the decisions: all tickets, no assets except those assigned to the 
 **Status.** The profile fix is not written. It needs a new migration, a local PGlite test, and a separate production approval.
 
 **usertest.** The flag from section 27 remains in place (`required`), so the account must change its password in the app before the full general-user checks can run again.
+
+## 29. Profile visibility and support assignment confirmed (user instruction, 2026-11-24)
+
+**Profile rule (user instruction, this turn).** General users and support staff see all profiles, so they can see other users' names in ticket requester and assignee fields, comment authors, asset holder names, and the support-staff assignment list. Administrators keep full access. This is the rule that production migration `20261124064640` applies (`profiles_select_authenticated` = active user or own profile). It is also what the local test `password-gate-visibility.local.test.ts` expects. The gap listed in section 28 is therefore not a gap. Section 28 is superseded on this point.
+
+**Support can assign tickets to other staff (verified on production, rolled back).**
+- The app assigns through `update_ticket_with_activity` (`artifacts/itam/src/lib/queries/tickets.ts`, around line 346). The RPC is on production as an invoker function.
+- Neither the RPC nor `guard_ticket_update()` checks the assignee's role. Support returns early in the guard.
+- The Assign To control shows to support (`canManage` includes support). Its list is active support staff plus administrators (`detail.tsx`, around line 84).
+- Rolled-back probe as support staff: `update_ticket_with_activity` assigning a ticket to another active support staff member returned `assigned_match=true`. The probe ran in a transaction that was rolled back.
+
+**Not run.** The live signed-in role matrix (section 28). The UI has not been exercised in a browser.
