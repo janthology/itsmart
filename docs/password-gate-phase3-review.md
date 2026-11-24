@@ -479,3 +479,25 @@ Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off 
 **Result.** Pass on the database-level rules. The unadmitted session gets no notification rows and only its own profile. The full session gets its notifications and all profiles. This shows the rule that Realtime would enforce, but not that events were delivered over the websocket. A live websocket test still needs the user's machine.
 
 **Still open.** The role matrix results (the user reported it as done but has not sent the script output). The lockout check is recorded in section 19. The correct-password sign-in after expiry was reported as successful by the user.
+
+## 21. Role matrix, database layer, current state (2026-11-24)
+
+**Method.** The sandbox cannot reach the live broker or REST API, so the signed-in script (`password-gate-signed-in-check.mjs`) was not run. This is the database-layer equivalent, run as the `authenticated` role with claims. Each probe made temporary admitted sessions, and every probe rolled back. Afterwards there were no probe sessions or admitted rows. This covers the general user with a full session, which section 18 could not cover while the account was flagged.
+
+| Subject | Session | Tickets | Other users' tickets | Assets | Profiles | Own notifications |
+| --- | --- | --- | --- | --- | --- | --- |
+| Administrator (`admintest`) | full | 27 | n/a | 26 | 15 | n/a |
+| Support (`supporttest`) | full | 27 | n/a | 26 | 15 | n/a |
+| General user (`usertest`) | full | 27 | 27 | 26 | 15 | 3 |
+| General user (`usertest`) | unadmitted | 0 | n/a | 0 | 1 (own) | n/a |
+| anon | none | denied (permission error) | n/a | n/a | n/a | n/a |
+
+**Finding: the script's expectations for the full general user are out of date.**
+
+- Tickets: `password-gate-signed-in-check.mjs` expects a full general user to see only their own tickets. The current policy is `tickets_select_scoped` = `is_active_user()` (migration `20261030000006_general_users_view_all_tickets.sql`). That migration records a product decision: every active user may view all tickets and comment threads. Under that decision the script's check fails, and the failure is the script's fault, not the policy's. Section 7 of this doc also still lists "read another user's ticket: denied", which is stale.
+- Profiles: the script expects a full general user to see only their own profile. The current policy `profiles_select_authenticated` = `is_active_user()` OR own, so any active user sees all 15 profiles. I found no documented decision for this, so it needs a product decision before the script or the policy changes.
+- Assets: the script does not check assets for a full general user. The 26 visible assets are recorded here so the decision covers them too.
+
+**Not covered here.** The restricted (flagged) rows of section 7 need usertest flagged again, which is a second production write that needs approval. The write rows (maintenance RPCs, ticket create) were not exercised. The Realtime delivery and the live signed-in run are still open.
+
+**Earlier note correction.** The probe in the first attempt showed "SUP t27 a26 p1…". The message was truncated, and the rerun with the role switch shows support sees 15 profiles, as the policy allows.
