@@ -155,3 +155,9 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - Supabase Edge Function `login-broker` deployed to `rkwxdqludtdzbpuftsvi`, `verify_jwt=false`, ACTIVE, id `02114116-f161-4f74-87d5-b0639be17c81`. Source commit `68000a0`.
 - Vercel preview `dpl_EAYXzuGHpzynKb7FHQA7Uv47drrn` (commit `68000a0`) READY. Not promoted. Production still runs `dpl_EqdwEmFji1iMNbxBQepQfeeFB8gY`.
 - Not yet verified live: sign-in through the broker, the restricted-session flow, and the `session_id` claim. Details and the open list are in `docs/password-gate-phase3-review.md` section 13.
+
+## Update 2026-11-24: step 3.2 fix applied; login-broker v2 deployed
+
+- Database: migration `20261124032732` (`password_gate_broker_state_read`), applied to `rkwxdqludtdzbpuftsvi`. Read-only service-only function; no state, grant or policy change.
+- Edge Function `login-broker` version 2 deployed (ACTIVE, `verify_jwt=false`). It reads gate state through the RPC, not the table. Source commit `da2cbc6`.
+- Preview `dpl_EAYXzuGHpzynKb7FHQA7Uv47drrn` unchanged. Production unchanged.
