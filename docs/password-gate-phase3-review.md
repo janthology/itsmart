@@ -443,3 +443,18 @@ Not covered by this table: the general user with a full session (`usertest` is f
 Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off on a FAIL.
 
 **Realtime check (4.7): still not run.** It needs a Realtime subscription as the flagged `usertest` session (restricted), to `notifications` and `profiles`, while a business row changes. Expected: no business events. The positive control is a full session receiving its own notification. Send the results, and this becomes the next item.
+
+## 19. Live lockout check in the app, usertest (2026-11-24)
+
+**Run by the user, by hand, in the app on the preview, with the approved dedicated account `usertest@gmail.com`.** The user made wrong-password sign-in attempts for this account. The sign-in screen then showed "Too many sign-in attempts. Wait a few minutes and try again." (user screenshot). That is the 429 `too_many_attempts` path through the broker and the client message from `login-broker.ts`.
+
+**Server state, read-only (2026-11-24, checked by the assistant).** Table `public.password_gate_login_throttle`, key `189a52f7…aaf` (SHA-256 of `login:usertest@gmail.com`):
+
+- `failures` = 5
+- `window_started_at` = 05:46:08 UTC; `updated_at` = 05:46:20 UTC
+- `locked_until` = 06:01:20 UTC (15 minutes after the fifth failure)
+- `seconds_left` = 478 at the time of the query
+
+**Not recorded here:** the individual attempt results, the correct-password-while-locked result, and the check after the lock expires. The `--lockout` run of the script has not been done. The lock runs out at 06:01:20 UTC.
+
+**Other results from the user, not recorded in detail.** Realtime (4.7) was reported as done, with no results sent. The signed-in role matrix (section 18, steps 1 to 3) has not been reported back. Both need results before they can be marked passed.
