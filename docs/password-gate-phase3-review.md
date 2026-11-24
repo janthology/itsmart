@@ -670,3 +670,9 @@ This matches the decisions: all tickets, no assets except those assigned to the 
 - Rolled-back probe as support staff: `update_ticket_with_activity` assigning a ticket to another active support staff member returned `assigned_match=true`. The probe ran in a transaction that was rolled back.
 
 **Not run.** The live signed-in role matrix (section 28). The UI has not been exercised in a browser.
+
+## 30. No redeploy needed; UI check not run from the sandbox (2026-11-24)
+
+- **Redeploy.** The app code on production is from `4944fbe` (Vercel `dpl_8s7jcFURD7PjMbKM2GVWinmURd6k`, READY and PROMOTED). Since then, no app source file has changed; only test files, the signed-in check script, docs and the database migration (`20261124064640`, already applied) have changed. A redeploy would not change the running app, so none was made.
+- **UI check.** Not run. The sandbox cannot reach the live app (HTTP `000`), and the test passwords are not held here. The user runs the UI check in the browser.
+- **Live system state.** The profile rule (all profiles for general users and support staff) and support-to-support assignment are live through the database (section 29). usertest is still flagged (section 27) and must change its password in the app before it can sign in fully.
