@@ -689,3 +689,7 @@ The user ran the browser checks in the app and reports all three pass:
 **Still open.**
 - The live signed-in role-matrix script (section 28). The user has not run it, and the UI checks above replace it for now.
 - The lockout expiry, correct-password result, recorded in section 19 and earlier notes.
+
+## 32. Lockout check closed: correct password accepted after expiry (user report, 2026-11-24)
+
+After the `usertest` lock expired (section 19), a sign-in with the correct password succeeded. This closes the post-expiry item for the lockout check.
