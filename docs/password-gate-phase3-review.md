@@ -234,3 +234,37 @@ Decisions D1 to D8 were accepted on 2026-11-23. Step 3.0 was approved as written
 Step 3.1 (schema only) was **approved as written by the user on 2026-11-24 and applied** as migration `20261124012612`. Live checks: `scope` defaults to `full` with its check constraint; `password_gate_settings` holds one row, `shadow`; both new tables have RLS on and no policies; the restricted admit function is executable by `service_role` only; `authenticated` and `anon` have no access to the two new tables. `service_role` also has no direct privilege on the two new tables (the file revokes it), so step 3.3 must read the mode and write the shadow log through a SECURITY DEFINER function. Rollback (`schema-step31-rollback.sql`) not run. Package: `supabase/proposals/password-gate/schema-step31.sql` and `schema-step31-rollback.sql`. It adds `scope` to admitted sessions (default `full`), a restricted admit function (service role only; admits only `required` or `changing` accounts, with the current generation, a session created after the state was set, and an active account; refuses `resetting` and `cleared`; plain INSERT so it cannot overwrite a row), `password_gate_settings` (one row, `shadow`), and `password_gate_shadow_log`. It adds no policy or helper change. The local test (`artifacts/itam/src/lib/password-gate-phase3-step31.local.test.ts`, 15 tests with the addendum) covers the restricted-admit refusals, full-scope regression, no upgrade of a restricted row, and a rollback that refuses while restricted or shadow rows exist.
 
 Accepted risk, not blocking: the `supabase_admin` default privileges (see section 2). The next packages are step 3.4 (helpers and policies), step 3.2 (broker login) and step 3.3 (enforcement, after the shadow period). Each needs its own SQL, rollback, local test and approval. Nothing is applied to production without a separate approval.
+
+## 12. Shadow skipped; steps 3.2a, 3.3 and 3.4 (drafted 2026-11-24, not applied)
+
+**Decision.** On 2026-11-24 the user chose to skip the shadow period (D5). Each step still goes to production only on its own approval. Enforcement also still needs Phase 4 recovery, or a written acceptance of the stranded-account risk (section 5, step 6).
+
+**Read-only findings that change the plan:**
+
+- 14 of the 15 profiles have **no** `password_gate_state` row. Only one row exists (`cleared`). None of the 14 has `must_change_password` set. Phase 1 admit requires a `cleared` row, so without a backfill, enforcement would lock these accounts out, and the broker could not admit them. This is step 3.2a.
+- The guards (`guard_ticket_update`, `guard_ticket_insert`, `guard_profile_update`, `validate_asset_pm_dates`), `audit_retention_preview`, `correct_asset_maintenance`, `create_asset_with_history`, `record_asset_maintenance`, `return_asset_to_service` and `update_asset_pm_schedule` all deny or skip on a NULL role, or only fire when `auth.uid()` is set. None lets a NULL role through. Cron and service paths run with `auth.uid()` NULL and are not affected (PGlite-tested).
+- Storage (D8, read-only): 0 buckets, 0 objects, 0 storage policies. The inventory is clean for now. It must be repeated before step 3.4.
+- `anon` holds no table privileges on any public table.
+- `authenticated` can read or write 11 RLS tables, plus `profiles` as a special case.
+
+**Step 3.2a (data, `supabase/proposals/password-gate/gate-backfill-cleared.sql`, rollback `gate-backfill-cleared-rollback.sql`):** inserts a `cleared` gate row for each profile that has none. Each row gets a new generation. The rollback deletes only the rows the backfill created, and only if still `cleared`.
+
+**Step 3.3 (`supabase/proposals/password-gate/enforcement-step33.sql`, rollback `enforcement-step33-rollback.sql`):**
+
+- Adds `password_gate_enforcement_mode()`, `password_gate_full_session()` and `password_gate_scope_ok()`. The mode comes from the settings row. A missing row counts as `enforce`.
+- Replaces `get_my_role()` and `is_active_user()`, keeping their signatures and grants. Each returns the old value in `shadow` and the gated value in `enforce`.
+- Adds a RESTRICTIVE policy `password_gate_scope` (for all commands, to `authenticated`) on 11 tables: `admin_audit_log`, `asset_history`, `asset_maintenance_log`, `assets`, `categories`, `csp_violation_reports`, `entity_change_audit`, `notifications`, `ticket_comments`, `tickets`, and `profiles`. `profiles` has one carve-out: a caller can always read and write its own row. A restricted session therefore sees its own `must_change_password`, but the update policy still needs an active full-scope account, so it cannot write.
+- Leaves the settings at `shadow`. Applying step 3.3 changes nothing for users.
+- Snapshot-based rollback. It restores the two helpers exactly, drops the policies and helpers, and refuses to run without the snapshot.
+
+**Step 3.4 (enforce).** Not drafted as SQL beyond the flip itself: `UPDATE public.password_gate_settings SET mode = 'enforce', updated_at = clock_timestamp() WHERE id = 1;`. Prerequisites: step 3.2 deployed (the broker is the only sign-in path); step 3.2a applied; every user has signed in through the broker (D3, so existing sessions have no admitted row and will be denied); the Realtime check (4.7) done on dedicated accounts; the signed-in role matrix (section 7) run; and Phase 4 recovery in place, or the stranded-account risk accepted in writing.
+
+**Local tests.** `artifacts/itam/src/lib/password-gate-phase3-step33.local.test.ts`: 19 tests (PGlite). Covered: shadow is inert; enforce denies an admin without a session; the carve-out; an unknown session claim; full admission for admin, support and general; a restricted session sees no business rows and cannot write its profile or create a ticket; an old session after a reset is denied and a new generation admits; an inactive account is denied and reactivation restores it; an account without a gate row cannot be admitted; service, cron and guard paths run with no session; anon has no path; the backfill (create, roll back only its own rows, re-apply); the fast switch back to shadow; the structural rollback restores the helper definitions exactly; and the rollback refuses without a snapshot. The full itam suite passes at 34 files and 346 tests, and `tsc --noEmit` exits 0.
+
+**Not done, and open:**
+
+- Step 3.2 (the broker in the frontend, and deploying the Edge login broker) is not drafted. `supabase/proposals/password-gate/login-broker.ts` is still only a prototype.
+- Self-signup and the register path: `profiles_insert_self` is unchanged, and I have not checked whether any path still creates an account without a gate row. Check before 3.4.
+- Realtime delivery (4.7) is not tested. It needs the dedicated accounts, at 3.4.
+- Local tests use PGlite, not GoTrue or PostgREST. The `session_id` claim in live tokens is still unverified (section 4.1), so verify it on a dedicated account before 3.4.
+- The test environment's `pnpm-lock.yaml` does not match the workspace `overrides` (the frozen install fails). The lockfile was not changed in the repository. Installing without the frozen flag gave working tests.
