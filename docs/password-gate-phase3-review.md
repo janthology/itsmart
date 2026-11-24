@@ -643,3 +643,18 @@ This matches the decisions: all tickets, no assets except those assigned to the 
 1. Run the script with `USER_FLAGGED=1` (restricted rows).
 2. usertest completes a password change in the app. This clears the flag.
 3. Run the script without `USER_FLAGGED`, with the new password (full general-user rows).
+
+## 28. Live signed-in role matrix skipped (user decision); profile visibility gap found (2026-11-24)
+
+**Skipped.** The user decided not to run the live signed-in role matrix (`artifacts/itam/scripts/password-gate-signed-in-check.mjs`), because they could not run it from PowerShell. The sections 26 and 27 results are database-level checks only: rolled-back probes as `authenticated` with claims, on production. They do not cover the browser UI or the login broker. Treat the signed-in matrix as not run.
+
+**Correction to section 26.** Section 26 said the general user's 15 visible profiles "match the decisions". That was wrong against the latest rule. The latest rule (2026-11-24) is:
+- General users see only their own profile.
+- Support users see no profiles other than their own.
+- Administrators keep full access.
+
+**Gap on production.** Migration `20261124064640` leaves `profiles_select_authenticated` as `is_active_user() OR id = auth.uid()`. This lets every active user read all profiles, which is the revised rule the user superseded. Production has the wrong profile scope. Assets, asset history and maintenance-log scope match the latest rule.
+
+**Status.** The profile fix is not written. It needs a new migration, a local PGlite test, and a separate production approval.
+
+**usertest.** The flag from section 27 remains in place (`required`), so the account must change its password in the app before the full general-user checks can run again.
