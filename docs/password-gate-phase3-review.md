@@ -460,3 +460,22 @@ Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off 
 **Other results from the user, not recorded in detail.** Realtime (4.7) was reported as done, with no results sent. The signed-in role matrix (section 18, steps 1 to 3) has not been reported back. Both need results before they can be marked passed.
 
 **Update (2026-11-24), after the lock expired.** The user reports that the correct password for `usertest@gmail.com` signed in successfully after the lock ran out. A read-only check afterwards found no throttle row for that key, so the count is back to zero. The correct-password-while-locked result was not recorded separately. The role matrix (section 18, steps 1 to 3) was reported as done by the user; the script output has not been received, so no result is recorded for it yet.
+
+## 20. Realtime check, database-level (2026-11-24)
+
+**Method.** The user chose a database-level check, because the sandbox cannot reach the live project or its Realtime websocket. The test uses the same row-level security that Realtime applies to `postgres_changes` events. It is not a websocket delivery test. The user approved one test write, but the probe rolled it back, so nothing was kept. The probe ran as the `authenticated` role with claims.
+
+**Session.** The restricted-session test uses an unadmitted session: a `session_id` claim with no row in `password_gate_admitted_sessions`. The positive control uses a full session: a temporary admitted row for a temporary `auth.sessions` row, both in the rolled-back block.
+
+**Test.** One notification for `usertest@gmail.com` was inserted, then the visibility of `notifications` and `profiles` was counted under each session.
+
+| Session | Notifications for usertest visible | Profiles visible |
+| --- | --- | --- |
+| Unadmitted (restricted) | 0 | 1 (own) |
+| Full (positive control) | 4 (3 existing plus the test row) | 15 |
+
+**Rollback check.** The probe block always raised, so the transaction was rolled back. Afterwards: 0 probe notifications, 0 admitted rows, 0 temporary sessions for usertest, and 3 real notifications for usertest.
+
+**Result.** Pass on the database-level rules. The unadmitted session gets no notification rows and only its own profile. The full session gets its notifications and all profiles. This shows the rule that Realtime would enforce, but not that events were delivered over the websocket. A live websocket test still needs the user's machine.
+
+**Still open.** The role matrix results (the user reported it as done but has not sent the script output). The lockout check is recorded in section 19. The correct-password sign-in after expiry was reported as successful by the user.
