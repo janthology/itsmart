@@ -136,6 +136,9 @@ function describeLoginError(err: unknown): string {
   if (/invalid login credentials/i.test(message)) {
     return "Incorrect email or password. Check your credentials and try again.";
   }
+  if (/account unavailable/i.test(message)) {
+    return "Your account is unavailable. Please contact an administrator.";
+  }
   if (/account deactivated/i.test(message)) {
     return "Your account has been deactivated. Please contact an administrator.";
   }

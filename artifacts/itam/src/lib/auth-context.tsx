@@ -5,6 +5,7 @@ import type { UserProfile } from "./supabase-queries";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import type { User } from "@supabase/supabase-js";
+import { signInThroughBroker } from './login-broker';
 
 interface AuthContextType {
   user: UserProfile | null;
@@ -152,12 +153,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async ({ email, password }: { email: string; password: string }) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) {
-      // No toast here: the login page renders sign-in failures inline by
-      // the form (wrong credentials vs. connection problems), so toasting
-      // the same failure would double-report it.
-      throw error;
+    // Sign-in goes only through the password gate broker (Phase 3 step 3.2).
+    // The broker admits the session in the database before it returns tokens.
+    // No toast here: the login page renders sign-in failures inline by
+    // the form (wrong credentials vs. connection problems), so toasting
+    // the same failure would double-report it.
+    const brokerSession = await signInThroughBroker(email, password);
+    const { error } = await supabase.auth.setSession({
+      access_token: brokerSession.access_token,
+      refresh_token: brokerSession.refresh_token,
+    });
+    if (error) throw error;
+    // A restricted session (gate phase required or changing) can only reach
+    // /change-password. The broker decides this, so the route follows it even
+    // if the profile flag is out of step.
+    if (brokerSession.password_change_required) {
+      setMustChangePassword(true);
+      setIsLoading(false);
+      setLocationRef.current('/change-password');
+      return;
     }
     // Check is_active and must_change_password BEFORE the auth state change
     // can render the dashboard — keep loading until we know
