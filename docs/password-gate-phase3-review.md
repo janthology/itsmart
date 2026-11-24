@@ -341,3 +341,29 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 **Local tests run in this check:** `login-broker-edge.test.ts` and `login-broker.test.ts`, 25 tests, all passing. `password-gate-recovery.local.test.ts`, 12 tests, passing.
 
 **Decision.** Step 3.4 is **not ready**. The enforce flip (`UPDATE public.password_gate_settings SET mode = 'enforce' ... WHERE id = 1`) stays blocked until the user runs the live browser checks above and decides on the D3 item and on Phase 4. The flip and the Phase 4 apply each need their own approval.
+
+## 15. User decisions and Phase 4 applied (2026-11-24)
+
+**Standing rule from the user.** Self-registration is not allowed. Only an administrator creates user accounts, through `create-user`. Verified: `create-user` requires an active administrator (line 109 of `supabase/functions/create-user/index.ts`), and GoTrue has `disable_signup = true` (read live, this run).
+
+**User decisions.**
+
+1. **Live checks for 3.2 reported passed.** The user reports the five live checks passed. The four live checks from section 14 (wrong password, inactive account, restricted route, `resetting` refused with 403) are covered by this report. The fifth item in section 14 was rate limiting, which is not a live check. It stays open until the user confirms otherwise.
+2. **Test accounts.** The checks used the three dedicated test accounts (`admintest`, `supporttest`, `usertest`). The retained administrator was not used.
+3. **D3 accepted.** The 11 accounts that have not signed in through the broker are accepted. Nobody has an active session right now, so nothing unadmitted would be denied at enforcement.
+4. **Phase 4 applied to production.** See below.
+
+**Phase 4 apply (production, 2026-11-24).**
+
+- Migration `20261124041528_password_gate_recovery` (created by the migration tool, then verified). Source: `supabase/migrations/20261124041528_password_gate_recovery.sql`. Rollback: `supabase/rollbacks/20261124041528_password_gate_recovery.sql`. The rollback refuses while the recovery log has rows.
+- Verified after apply: `password_gate_recovery_log` exists with RLS on and 0 rows. `password_gate_recover_account` is `SECURITY DEFINER` and executable by `service_role` only (`anon` and `authenticated` both false). `service_role` has no SELECT on the log.
+- Unchanged: 15 of 15 gate rows `cleared`; mode `shadow`; no profile has `must_change_password` set.
+- Local tests: the full itam suite passed (38 files, 389 tests) before the rename, and the recovery and infrastructure tests (39) passed after it.
+
+**Step 3.4 status (not flipped).** The enforce flip is still not applied, and it needs its own explicit approval. Blockers still open:
+
+- **Realtime check (4.7).** Not done. It needs a browser subscription test on the dedicated accounts.
+- **Signed-in role matrix (section 7).** Not done. It needs the signed-in dedicated accounts, and any write needs approval.
+- **Explicit approval for the flip.** Not given. The user's approval list covered Phase 4 and D3, not the flip.
+- **Rate limiting and lockout (3.2, item 5).** Open. Not a live check. Needs a decision.
+- **`register()` in `artifacts/itam/src/lib/auth-context.tsx`.** Still calls `supabase.auth.signUp`. No component calls it, and `/register` redirects to `/login`. Signup is disabled at GoTrue, so this cannot create an account today. Recommended: remove it in a separate change, to match the standing rule above.

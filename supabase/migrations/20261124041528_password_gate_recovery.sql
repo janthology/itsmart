@@ -1,6 +1,6 @@
--- Trusted password gate, Phase 4: recovery of stranded accounts (migration 20261124041419).
--- STATUS: APPLIED to production on 2026-11-24 (approved by the user, migration 20261124041419).
--- Rollback: supabase/rollbacks/20261124041419_password_gate_recovery.sql
+-- Trusted password gate, Phase 4: recovery of stranded accounts (migration 20261124041528).
+-- STATUS: APPLIED to production on 2026-11-24 (approved by the user, migration 20261124041528).
+-- Rollback: supabase/rollbacks/20261124041528_password_gate_recovery.sql
 -- Runbook: docs/password-gate-phase4-recovery.md
 --
 -- What it does, for one account whose gate is stuck (resetting or changing), or which has no gate row:

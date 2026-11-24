@@ -1,6 +1,6 @@
 # Trusted password gate, Phase 4: recovery runbook (DRAFT, not applied)
 
-Status (2026-11-24): **drafted, not applied to any database.** Proposal: `supabase/proposals/password-gate/phase4-recovery.sql`. Rollback: `supabase/proposals/password-gate/phase4-recovery-rollback.sql`. Local test: `artifacts/itam/src/lib/password-gate-recovery.local.test.ts` (12 tests, passing on PGlite, applied after every repository migration).
+Status (2026-11-24): **applied to production** as migration `20261124041528` (`password_gate_recovery`), approved by the user. Migration: `supabase/migrations/20261124041528_password_gate_recovery.sql`. Rollback: `supabase/rollbacks/20261124041528_password_gate_recovery.sql`. No account has been recovered yet; no data was changed by the apply. Local test: `artifacts/itam/src/lib/password-gate-recovery.local.test.ts` (12 tests, passing on PGlite, applied after every repository migration).
 
 This closes the Phase 2 stranded-account rows that say **None (Phase 4)**, so an account is not locked forever. It does not close the Phase 3 gate, and it does not replace the Option B risk acceptance in `docs/password-gate-phase2-review.md` (line 94). Until this is applied to production, that acceptance still stands.
 
@@ -53,5 +53,5 @@ This closes the Phase 2 stranded-account rows that say **None (Phase 4)**, so an
 
 ## Apply and rollback
 
-- Apply: one approval per apply, to production. Test on PGlite first (done). Confirm the rollback is current.
+- Apply: done 2026-11-24 (approved). Test on PGlite first (done, 12 tests). Rollback is current.
 - Rollback: `phase4-recovery-rollback.sql`. It refuses while `password_gate_recovery_log` has rows. Undo a recovery per account with the admin reset, not by deleting log rows.
