@@ -297,3 +297,47 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 **Correction (2026-11-24, found in the first live test).** The sign-in error on the preview was a 503 `login_unavailable` for both test accounts. The cause was in the draft: `login-broker` read `password_gate_state` over REST. Phase 1 (`20261101000024`) revoked every privilege on that table from `service_role`, so PostgREST refused the read and the broker failed closed. The accounts themselves are fine (both active, confirmed, `cleared`). Fix drafted, not applied: `supabase/proposals/password-gate/broker-state-read.sql` (a read-only, service-only function `password_gate_broker_state(uuid)`), its rollback, and the broker change to call it. Tests: `password-gate-broker-state.local.test.ts` (6) and the broker edge test (now 19). Apply order once approved: the database function first, then redeploy `login-broker`. Redeploying the broker before the database function would return 503 again.
 
 **Applied (2026-11-24, approved by the user).** Database: migration `20261124032732` (`password_gate_broker_state_read`). Verified: `service_role` can execute the function; `anon` and `authenticated` cannot; it is SECURITY DEFINER; the state table is unchanged (15 rows); `service_role` still has no table privilege. Edge Function `login-broker` redeployed as version 2 (ACTIVE, `verify_jwt=false`), body read back and matches the source. Preview `dpl_EAYXzuGHpzynKb7FHQA7Uv47drrn` needs no rebuild (the frontend did not change). Sign-in on the preview still needs a live test by the user.
+
+## 14. Readiness check for 3.2 and 3.4 (read-only, this run)
+
+**Nothing was applied or flipped in this run.** The mode is still `shadow`. No production write was made. The checks below were read-only catalog and table queries on `rkwxdqludtdzbpuftsvi`, plus local test runs. The sandbox cannot reach Supabase or the preview hosts (HTTP returned `000`), so no live sign-in was attempted here.
+
+**Live state read back:**
+
+- `password_gate_settings`: `mode = shadow`, last updated 2026-11-24 01:26:12 UTC.
+- `password_gate_state`: 15 rows, all `cleared`. 15 profiles and 15 `auth.users`. No profile without a gate row, and no auth user without a profile.
+- `password_gate_admitted_sessions`: 0 rows. `auth.sessions`: 0 rows. Nobody is signed in right now. The `usertest` session that was admitted earlier has ended, and its admitted row went with it through the cascade.
+- Storage (D8, repeated): 0 buckets, 0 objects, 0 storage policies.
+- Realtime publication `supabase_realtime`: `public.notifications` and `public.profiles`. RLS is on for both. Delivery under RLS is not tested.
+- `password_gate_recovery_log`: does not exist. Phase 4 is not applied.
+- `auth.users.last_sign_in_at`: `admintest`, `supporttest`, `theneilcruz` and `usertest` signed in between 03:48 and 03:51 UTC on 2026-11-24, which is the broker test window. The other 11 accounts last signed in before 2026-11-21.
+
+**Status of the 3.2 checks:**
+
+| Check | Status |
+| --- | --- |
+| Live `session_id` claim (section 4.1) | **Verified.** The broker refuses any token without a UUID `session_id`, and it admitted the dedicated account `usertest` at 03:51:14. The admitted row's `session_id` matches the `auth.sessions` row. |
+| Restricted session completes the password change (13, item 5) | **Verified by the user's report** (`usertest` signs in and completes the change). The database shows `usertest` `cleared` with `must_change_password = false`. |
+| Wrong password: refused, no session, no tokens | **Local only** (`login-broker-edge.test.ts`: `login_failed` without a session). **Live check still open** (browser test by the user). |
+| Inactive account: `account_unavailable`, no tokens | **Local only** (test: refused and logged out). **Live check still open.** Candidates: `jonakampani@gmail.com` and `shanewesleymangoba31@gmail.com` (both inactive; the second is an administrator). |
+| Restricted route: a `required` or `changing` session reaches only `/change-password` | **Live check still open.** No dedicated account is currently flagged. Flagging one is a production write and needs approval. |
+| `resetting` account refused with 403 | **Local only** (test). **Live check still open.** |
+| Rate limiting and lockout | **Open.** Not in the function. GoTrue applies some limits only. |
+
+**Status of the 3.4 prerequisites (section 5):**
+
+| Prerequisite | Status |
+| --- | --- |
+| Step 3.2 deployed (broker is the only sign-in path) | Met for the code: production runs the broker build, and `login-broker` v2 is live. The open checks above remain. |
+| Step 3.2a applied | Met. 15 of 15 gate rows. |
+| Every user has signed in through the broker (D3) | **Not met literally.** Four accounts have. Eleven have not signed in since before 2026-11-21. Because nothing is signed in right now, no unadmitted session exists to deny. Enforcement would only affect future sign-ins, and those go through the broker. Your decision whether this counts as met. |
+| Realtime check (4.7) on dedicated accounts | **Not done.** Needs a browser subscription test. |
+| Signed-in role matrix (section 7) | **Not done.** Needs signed-in dedicated accounts and approval for writes. |
+| Phase 4 recovery in place, or stranded-account risk accepted in writing | **Not met.** Drafted and tested (`c77665b`), not applied. Needs approval to apply, or written acceptance. |
+| `session_id` claim verified on a dedicated account | **Met** (see above). |
+| Self-signup and register path | Signup is disabled at GoTrue (`disable_signup = true`). `register()` in `auth-context.tsx` still calls `signUp` directly, which would make a session with no admitted row. No component calls it, and `/register` redirects to `/login`. It is dead code today. Remove it or route it through the broker before signup is re-enabled. |
+| Storage inventory (D8) | **Met** for this run (empty). |
+
+**Local tests run in this check:** `login-broker-edge.test.ts` and `login-broker.test.ts`, 25 tests, all passing. `password-gate-recovery.local.test.ts`, 12 tests, passing.
+
+**Decision.** Step 3.4 is **not ready**. The enforce flip (`UPDATE public.password_gate_settings SET mode = 'enforce' ... WHERE id = 1`) stays blocked until the user runs the live browser checks above and decides on the D3 item and on Phase 4. The flip and the Phase 4 apply each need their own approval.
