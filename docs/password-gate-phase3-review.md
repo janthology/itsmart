@@ -676,3 +676,16 @@ This matches the decisions: all tickets, no assets except those assigned to the 
 - **Redeploy.** The app code on production is from `4944fbe` (Vercel `dpl_8s7jcFURD7PjMbKM2GVWinmURd6k`, READY and PROMOTED). Since then, no app source file has changed; only test files, the signed-in check script, docs and the database migration (`20261124064640`, already applied) have changed. A redeploy would not change the running app, so none was made.
 - **UI check.** Not run. The sandbox cannot reach the live app (HTTP `000`), and the test passwords are not held here. The user runs the UI check in the browser.
 - **Live system state.** The profile rule (all profiles for general users and support staff) and support-to-support assignment are live through the database (section 29). usertest is still flagged (section 27) and must change its password in the app before it can sign in fully.
+
+## 31. Browser UI checks passed (user report, 2026-11-24)
+
+The user ran the browser checks in the app and reports all three pass:
+1. **Support reassignment.** Support assigns a ticket to another support staff member. It saves and shows in the activity log.
+2. **Names visible.** As general user and as support, requester, assignee and comment names show, and the support-staff list is visible.
+3. **Assets.** As general user, only assigned assets are visible. As support, all assets are visible.
+
+**usertest state (read-only check, production).** Phase `cleared`, `must_change_password` false, one admitted session. The account is no longer flagged.
+
+**Still open.**
+- The live signed-in role-matrix script (section 28). The user has not run it, and the UI checks above replace it for now.
+- The lockout expiry, correct-password result, recorded in section 19 and earlier notes.
