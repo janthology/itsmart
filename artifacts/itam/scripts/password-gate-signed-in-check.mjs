@@ -99,8 +99,10 @@ const adminTickets = tokens.admin ? await rest('tickets?select=id', tokens.admin
 const adminAssets = tokens.admin ? await rest('assets?select=id,assigned_to', tokens.admin) : null;
 const adminTicketRows = adminTickets && Array.isArray(adminTickets.body) ? adminTickets.body.length : null;
 const adminAssetRows = adminAssets && Array.isArray(adminAssets.body) ? adminAssets.body.length : null;
+const adminProfiles = tokens.admin ? await rest('profiles?select=id', tokens.admin) : null;
+const adminProfileRows = adminProfiles && Array.isArray(adminProfiles.body) ? adminProfiles.body.length : null;
 
-// Support (decision): all tickets, all assets, own profile only.
+// Support (decision): all tickets, all assets, all profiles (names for tickets, assets and the staff list).
 if (tokens.support) {
   const me = claimsOf(tokens.support).sub;
   const t = await rest('tickets?select=id', tokens.support);
@@ -112,11 +114,13 @@ if (tokens.support) {
   const aOk = a.status === 200 && aRows > 0 && (adminAssetRows === null || aRows === adminAssetRows);
   report(aOk ? 'PASS' : 'FAIL', 'support: reads all assets', `status ${a.status}, rows ${aRows}, administrator ${adminAssetRows ?? 'n/a'}`);
   const p = await rest('profiles?select=id', tokens.support);
-  report(p.status === 200 && Array.isArray(p.body) && p.body.length === 1 && p.body[0].id === me ? 'PASS' : 'FAIL', 'support: reads own profile only', `status ${p.status}, rows ${Array.isArray(p.body) ? p.body.length : 'n/a'}`);
+  const pRows = Array.isArray(p.body) ? p.body.length : -1;
+  const pOk = p.status === 200 && pRows > 1 && (adminProfileRows === null || pRows === adminProfileRows);
+  report(pOk ? 'PASS' : 'FAIL', 'support: reads all profiles', `status ${p.status}, rows ${pRows}, administrator ${adminProfileRows ?? 'n/a'}`);
 }
 
 // 3. General user, full session (decisions): all tickets (product decision, migration 20261030000006);
-//    only the assets assigned to this user; own profile only.
+//    only the assets assigned to this user; all profiles.
 // Flagged: restricted, no business rows, own profile only.
 if (tokens.user && !userFlagged) {
   const me = claimsOf(tokens.user).sub;
@@ -132,9 +136,11 @@ if (tokens.user && !userFlagged) {
   report(aOk ? 'PASS' : 'FAIL', 'general user: only assets assigned to self', `status ${a.status}, rows ${aRows ? aRows.length : 'n/a'}, not assigned to self ${notMine}, expected ${expectedAssets ?? 'n/a'}`);
   if (expectedAssets === 0) report('NOTE', 'general user: no assets are assigned to the test account, so a pass means no assets are visible to it');
   const pr = await rest(`profiles?select=id,must_change_password&id=eq.${me}`, tokens.user);
-  report(pr.status === 200 && Array.isArray(pr.body) && pr.body.length === 1 ? 'PASS' : 'FAIL', 'general user: reads own profile only', `rows ${Array.isArray(pr.body) ? pr.body.length : 'n/a'}`);
+  report(pr.status === 200 && Array.isArray(pr.body) && pr.body.length === 1 ? 'PASS' : 'FAIL', 'general user: reads own profile', `rows ${Array.isArray(pr.body) ? pr.body.length : 'n/a'}`);
   const others2 = await rest('profiles?select=id', tokens.user);
-  report(others2.status === 200 && Array.isArray(others2.body) && others2.body.length === 1 && others2.body[0].id === me ? 'PASS' : 'FAIL', 'general user: other profiles not visible', `rows ${Array.isArray(others2.body) ? others2.body.length : 'n/a'}`);
+  const oRows = Array.isArray(others2.body) ? others2.body.length : -1;
+  const oOk = others2.status === 200 && oRows > 1 && (adminProfileRows === null || oRows === adminProfileRows);
+  report(oOk ? 'PASS' : 'FAIL', 'general user: reads all profiles', `status ${others2.status}, rows ${oRows}, administrator ${adminProfileRows ?? 'n/a'}`);
 }
 if (tokens.user && userFlagged) {
   const me = claimsOf(tokens.user).sub;

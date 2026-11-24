@@ -1,26 +1,17 @@
--- Visibility scope for profiles, assets, asset history and maintenance log (decision, 2026-11-24).
+-- Visibility scope for assets, asset history and maintenance log (decision, 2026-11-24).
 --
--- Profiles: every active user sees their own profile. Administrators see all profiles.
---           Support staff and general users see only their own.
 -- Assets:   administrators and support staff see all assets. General users see only the
 --           assets assigned to them.
--- Asset history and maintenance log follow the asset they belong to (they are visible only
--- when the asset itself is visible to the same user).
--- Tickets:  unchanged. Every active user may view all tickets and comment threads
---           (migration 20261030000006_general_users_view_all_tickets.sql).
+-- Asset history and maintenance log follow the asset they belong to (visible only when the
+-- asset itself is visible to the same user).
+-- Profiles: unchanged. Every active user sees all profiles (names are needed for ticket
+--           requesters, assignees, comment authors, asset holders and the support-staff list).
+-- Tickets:  unchanged. Every active user may view all tickets (migration 20261030000006), and
+--           support staff may update any ticket, including its assignee.
 --
 -- The password_gate_scope policies are RESTRICTIVE, so the gate still applies on top of these
 -- permissive SELECT policies. Writes are unchanged.
 -- Rollback: supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql
-
-DROP POLICY IF EXISTS profiles_select_authenticated ON public.profiles;
-CREATE POLICY profiles_select_scoped
-  ON public.profiles FOR SELECT
-  TO authenticated
-  USING (
-    id = (SELECT auth.uid())
-    OR (public.is_active_user() AND public.get_my_role() = 'administrator'::public.user_role)
-  );
 
 DROP POLICY IF EXISTS assets_select_authenticated ON public.assets;
 CREATE POLICY assets_select_scoped

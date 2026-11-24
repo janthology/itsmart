@@ -4,8 +4,8 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { readdirSync, readFileSync } from 'node:fs';
 
-// Visibility scope (migration 20261124060000): profiles, assets, asset history and maintenance log.
-// Tickets stay as in migration 20261030000006. Applied after every repository migration on a local
+// Visibility scope (migration 20261124060000): assets, asset history and maintenance log.
+// Profiles and tickets stay as they are (every active user sees all profiles and tickets). Applied after every repository migration on a local
 // PostgreSQL in PGlite. Not GoTrue, PostgREST, Realtime or live Supabase.
 const migrationsDir = new URL('../../../../supabase/migrations/', import.meta.url);
 const rollbackFile = new URL('../../../../supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql', import.meta.url);
@@ -118,18 +118,16 @@ beforeAll(async () => {
 }, 120000);
 afterAll(async () => { if (db) await db.close(); });
 
-describe('profiles (visibility scope, local)', () => {
+describe('profiles are unchanged: every active user sees all profiles (local)', () => {
   it('administrator sees all profiles', async () => {
     await asUser(admin, sAdmin);
     expect((await visibleIds('profiles')).sort()).toEqual((await allIds('profiles')).sort());
   });
-  it('general user sees only their own profile', async () => {
+  it('general user and support staff see all profiles', async () => {
     await asUser(general, sGeneral);
-    expect(await visibleIds('profiles')).toEqual([general]);
-  });
-  it('support staff sees only their own profile', async () => {
+    expect((await visibleIds('profiles')).sort()).toEqual((await allIds('profiles')).sort());
     await asUser(support, sSupport);
-    expect(await visibleIds('profiles')).toEqual([support]);
+    expect((await visibleIds('profiles')).sort()).toEqual((await allIds('profiles')).sort());
   });
   it('flagged (restricted) session sees only its own profile', async () => {
     await asUser(flagged, sFlagged);
@@ -172,6 +170,18 @@ describe('asset history and maintenance log follow the asset (visibility scope, 
 });
 
 describe('tickets are unchanged (migration 20261030000006)', () => {
+  it('support staff can assign a ticket to another staff member; a general user cannot reassign someone else\'s ticket', async () => {
+    await asPostgres();
+    const ticket = await db.query<{ id: string }>(`SELECT id FROM public.tickets WHERE title='ticket by admin'`);
+    await asUser(support, sSupport);
+    const assigned = await db.query(`UPDATE public.tickets SET assigned_to = '${admin}' WHERE id = '${ticket.rows[0].id}' RETURNING id`);
+    expect(assigned.rows).toHaveLength(1);
+    await asUser(general, sGeneral);
+    const denied = await db.query(`UPDATE public.tickets SET assigned_to = '${general}' WHERE id = '${ticket.rows[0].id}' RETURNING id`).catch(() => ({ rows: [] }));
+    expect(denied.rows).toHaveLength(0);
+    await asPostgres();
+    await db.exec(`UPDATE public.tickets SET assigned_to = NULL WHERE id = '${ticket.rows[0].id}'`);
+  });
   it('general user sees all tickets; flagged session sees none', async () => {
     await asUser(general, sGeneral);
     expect((await visibleIds('tickets')).sort()).toEqual((await allIds('tickets')).sort());
@@ -181,17 +191,15 @@ describe('tickets are unchanged (migration 20261030000006)', () => {
 });
 
 describe('rollback restores the previous permissive policies (local)', () => {
-  it('general user sees all assets and all profiles after rollback, and the migration restores the scope', async () => {
+  it('general user sees all assets after rollback, and the migration restores the scope', async () => {
     await asPostgres();
     await db.exec(readFileSync(rollbackFile, 'utf8'));
     await asUser(general, sGeneral);
     expect(await visibleIds('assets')).toHaveLength(3);
-    expect((await visibleIds('profiles')).sort()).toEqual((await allIds('profiles')).sort());
     await asPostgres();
     const sql = readFileSync(new URL(visibilityFile, migrationsDir), 'utf8');
     await db.exec(sql);
     await asUser(general, sGeneral);
     expect(await visibleIds('assets')).toEqual([assetGeneral]);
-    expect(await visibleIds('profiles')).toEqual([general]);
   });
 });

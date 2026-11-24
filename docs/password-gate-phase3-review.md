@@ -569,3 +569,31 @@ Options: (a) a names-only directory (id, full name, role) that every active user
 - Requester name search (`tickets.ts`, profile ilike lookup), which now matches only the user's own name for non-administrators.
 
 The app change for these is a separate piece of work, and the open decision from section 22 (names-only directory vs strict rule) is still open.
+
+## 24. Profiles stay open; support can assign tickets (2026-11-24)
+
+**Decisions from the user (supersede section 22 and the profile part of section 23).**
+
+- General users and support staff see all profiles. Names are needed for ticket requesters and assignees, comment authors, asset holders and the support-staff list.
+- Support staff can assign tickets to other staff.
+- Unchanged from section 23: general users see only the assets assigned to them, and support staff and administrators see all assets. Every active user sees all tickets.
+
+**What changed in the migration (`20261124060000`, still not applied to production).** The profiles policy is no longer touched, so the existing `profiles_select_authenticated` (every active user sees all profiles) stays. The migration now only narrows assets, asset history and maintenance log. The rollback has been trimmed to match.
+
+**Name lookups.** The consequence listed in section 23 for profiles no longer applies, because profiles remain visible to every active user.
+
+**Support assigning tickets.** Checked in the repository:
+
+- `tickets_update_scoped` allows support staff to update any ticket.
+- The `guard_ticket_update` trigger returns early for support staff, so it does not block reassignment.
+- `update_ticket_with_activity` runs under the caller's row-level security, so support staff can use it. The assignment dropdown in `pages/tickets/detail.tsx` uses the support-staff list (`useGetSupportStaff`).
+- The local test shows a support session can reassign a ticket, and a general user cannot reassign someone else's ticket.
+- Not checked live.
+
+**Tests.**
+- `password-gate-visibility.local.test.ts`: 12 of 12 pass (includes profiles visible to general and support, and support reassignment).
+- Full itam suite: 40 files, 423 tests pass. `tsc --noEmit` exit 0.
+
+**Script (`password-gate-signed-in-check.mjs`).** The support and general-user rows now expect all profiles (count matches the administrator's). The general-user "own profile" row is renamed to "reads own profile", since it checks the user's own row. Syntax checked; not run live.
+
+**Still needed.** Approval to apply `20261124060000` to production. Until then the live script's general-user asset row and support row fail (section 22 explains which).

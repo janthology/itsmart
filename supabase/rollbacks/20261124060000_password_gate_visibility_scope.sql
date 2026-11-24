@@ -1,12 +1,6 @@
 -- Rollback for 20261124060000_password_gate_visibility_scope.sql.
--- Restores the previous permissive SELECT policies (all active users see all profiles, assets,
--- asset history and maintenance log). Run only if the visibility decision is withdrawn.
-
-DROP POLICY IF EXISTS profiles_select_scoped ON public.profiles;
-CREATE POLICY profiles_select_authenticated
-  ON public.profiles FOR SELECT
-  TO authenticated
-  USING (public.is_active_user() OR id = (SELECT auth.uid()));
+-- Restores the previous permissive SELECT policies on assets, asset history and maintenance log
+-- (all active users see all of them). Run only if the visibility decision is withdrawn.
 
 DROP POLICY IF EXISTS assets_select_scoped ON public.assets;
 CREATE POLICY assets_select_authenticated
