@@ -57,7 +57,11 @@ function load(scenario: Scenario): { handler: Handler; calls: Calls } {
       return scenario.logout ?? new Response(null, { status: 204 })
     }
     if (url.includes('/rest/v1/profiles')) return json(scenario.profile ?? [{ is_active: true }])
-    if (url.includes('/rest/v1/password_gate_state')) return json(scenario.gate ?? [{ phase: 'cleared', operation_id: generation }])
+    if (url.includes('/rest/v1/password_gate_state')) return json({ message: 'permission denied for table password_gate_state' }, 401)
+    if (url.includes('/rest/v1/rpc/password_gate_broker_state')) {
+      if (scenario.gate instanceof Response) return scenario.gate
+      return json(scenario.gate ?? [{ phase: 'cleared', operation_id: generation }])
+    }
     if (url.includes('/rest/v1/rpc/')) {
       if (scenario.admit instanceof Error) throw scenario.admit
       return scenario.admit ?? new Response(null, { status: 204 })
@@ -83,7 +87,32 @@ const post = (body: unknown) => new Request('https://synthetic.invalid/login-bro
   body: typeof body === 'string' ? body : JSON.stringify(body),
 })
 const creds = { email, password }
-const rpcCalls = (calls: Calls) => calls.urls.filter(u => u.includes('/rest/v1/rpc/')).map(u => u.split('/rpc/')[1])
+// Admission RPCs only. The read of gate state is checked separately below.
+const rpcCalls = (calls: Calls) => calls.urls
+  .filter(u => u.includes('/rest/v1/rpc/') && !u.includes('/rpc/password_gate_broker_state'))
+  .map(u => u.split('/rpc/')[1])
+
+describe('login-broker: gate state is read through the service-only RPC', () => {
+  it('never reads the password_gate_state table directly (service_role has no table privilege)', async () => {
+    const { handler, calls } = load({})
+    expect((await handler(post(creds))).status).toBe(200)
+    expect(calls.urls.some(u => u.includes('/rest/v1/password_gate_state'))).toBe(false)
+    expect(calls.urls.some(u => u.includes('/rest/v1/rpc/password_gate_broker_state'))).toBe(true)
+  })
+
+  it('sends the verified sub to the state RPC', async () => {
+    const { handler, calls } = load({})
+    await handler(post(creds))
+    expect(calls.bodies).toContainEqual({ p_user: userId })
+  })
+
+  it('returns 503 login_unavailable when the state RPC fails, and logs out', async () => {
+    const { handler, calls } = load({ gate: new Response('{"message":"permission denied"}', { status: 401 }) })
+    const response = await handler(post(creds))
+    expect(response.status).toBe(503)
+    expect(calls.logouts).toBe(1)
+  })
+})
 
 describe('login-broker: request handling', () => {
   it('answers OPTIONS and rejects other methods', async () => {

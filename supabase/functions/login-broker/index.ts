@@ -163,10 +163,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse(403, { code: 'account_unavailable' })
     }
 
-    const gateResponse = await fetch(
-      `${base}/rest/v1/password_gate_state?user_id=eq.${claims.sub}&select=phase,operation_id`,
-      { headers: serviceHeaders, redirect: 'error' },
-    )
+    // Read through the service-only RPC. The table itself has no service_role privilege (Phase 1).
+    const gateResponse = await fetch(`${base}/rest/v1/rpc/password_gate_broker_state`, {
+      method: 'POST',
+      headers: serviceHeaders,
+      redirect: 'error',
+      body: JSON.stringify({ p_user: claims.sub }),
+    })
     if (!gateResponse.ok) {
       await discardSession()
       return jsonResponse(503, { code: 'login_unavailable' })
