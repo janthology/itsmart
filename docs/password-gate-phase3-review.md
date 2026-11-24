@@ -537,3 +537,35 @@ These FAILs are the expected result until the visibility change is applied. They
 Options: (a) a names-only directory (id, full name, role) that every active user can read, while email and other profile fields stay private; or (b) the strict rule, with the app changed to show "Unknown user" for other users and the staff list served another way. Option (a) departs from "should not see other profiles" in the strictest sense, so it needs the user's decision.
 
 **Also stale:** section 7's line "read another user's ticket: denied" is out of date (see the decision on all tickets).
+
+## 23. Visibility migration written and tested locally; not applied to production (2026-11-24)
+
+**Files.**
+- `supabase/migrations/20261124060000_password_gate_visibility_scope.sql`
+- `supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql`
+- `artifacts/itam/src/lib/password-gate-visibility.local.test.ts` (12 tests, PGlite, applies every migration and the Step 3.3 proposals in production order, then enforce mode)
+
+**What it changes (SELECT only; writes are unchanged).**
+
+- Profiles: `profiles_select_authenticated` is replaced by `profiles_select_scoped`. A user sees their own profile. An administrator sees all profiles. Support staff and general users see only their own.
+- Assets: `assets_select_authenticated` is replaced by `assets_select_scoped`. Administrators and support staff see all assets. General users see only assets assigned to them.
+- Asset history and maintenance log: these now follow the asset they belong to (visible only when the asset is visible to the same user). This was not in the request; it applies the same rule so a general user cannot read history of assets they don't hold. It is included in this migration, and can be removed before applying if you do not want it.
+- Tickets: unchanged (migration `20261030000006`, every active user sees all tickets).
+
+**Why it is safe to replace these policies.** The `password_gate_scope` policies are RESTRICTIVE (checked in `pg_policies`), so the gate still narrows whatever the permissive policies allow. The gate policies are untouched.
+
+**Test results (local).**
+- `password-gate-visibility.local.test.ts`: 12 of 12 pass.
+- `password-gate-phase3-step33.local.test.ts`: one assertion changed. The backfill test expected a general user to see all assets; it now assigns one seeded asset to that account and checks that exactly that asset is visible, then restores it. 19 of 19 pass.
+- Full itam suite: 40 files, 423 tests pass. `tsc --noEmit` exit 0.
+
+**Not applied to production.** The migration needs its own approval. Once applied, the script's general-user and support rows should pass; the current production state fails them (section 22).
+
+**Consequences for the app, not changed by this migration.** Under the rule as decided, these lose names for the roles affected:
+
+- Ticket requester and assignee names, and comment author names, for general users and support staff (embedded profile joins in `tickets.ts` and `shared.ts`).
+- The support-staff list used to assign tickets (`useGetSupportStaff`). Support staff can no longer list other support staff; administrators still can.
+- Asset holder names for support staff (asset joins in `assets.ts`).
+- Requester name search (`tickets.ts`, profile ilike lookup), which now matches only the user's own name for non-administrators.
+
+The app change for these is a separate piece of work, and the open decision from section 22 (names-only directory vs strict rule) is still open.

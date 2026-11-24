@@ -283,8 +283,13 @@ describe('backfill (step 3.2a, local)', () => {
     await db.exec("INSERT INTO auth.sessions(id,user_id,created_at) VALUES ('60000000-0000-4000-8000-000000000007','" + nogate + "',clock_timestamp())");
     const gen = await db.query<{ g: string }>(`SELECT operation_id::text AS g FROM password_gate_state WHERE user_id='${nogate}'`);
     await db.query('SELECT public.password_gate_admit_session($1,$2,$3)', [nogate, '60000000-0000-4000-8000-000000000007', gen.rows[0].g]);
+    // A general user sees only the assets assigned to them (migration 20261124060000).
+    await asPostgres();
+    await db.exec(`UPDATE assets SET assigned_to='${nogate}' WHERE asset_tag='T-STEP33-1'`);
     await asUser(nogate, '60000000-0000-4000-8000-000000000007');
-    expect(await count('assets')).toBe(2);
+    expect(await count('assets')).toBe(1);
+    await asPostgres();
+    await db.exec(`UPDATE assets SET assigned_to=NULL WHERE asset_tag='T-STEP33-1'`);
   });
 
   it('rollback removes only the rows the backfill created, then re-applies cleanly', async () => {
