@@ -143,3 +143,9 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - No policy, helper or app change. Nothing reads the new objects yet, so this step does not change any access decision.
 - Rollback: `supabase/proposals/password-gate/schema-step31-rollback.sql`, not run. It refuses while restricted or shadow rows exist.
 - Decision 2026-11-24: the user chose to skip the Supabase support request for the `supabase_admin` default privileges. This is an accepted risk, recorded in the Phase 3 review (section 2). No detective check was added.
+
+## Update 2026-11-24: Phase 3 steps 3.2a and 3.3 applied (shadow, no enforcement)
+
+- Step 3.2a, migration `20261124020959 password_gate_backfill_cleared`: gate rows for 14 profiles that had none (all `cleared`). Rollback `supabase/proposals/password-gate/gate-backfill-cleared-rollback.sql`, not run.
+- Step 3.3, migration `20261124021030 password_gate_enforcement_step33`: gate-aware `get_my_role` and `is_active_user`, new helpers, 11 restrictive scope policies plus the `profiles` policy. Settings left at `shadow`, so nothing is denied. Rollback `supabase/proposals/password-gate/enforcement-step33-rollback.sql`, not run.
+- Live checks passed (read-only). Enforcement is not on. Step 3.4 (enforce) needs step 3.2 (broker frontend) first and its own approval.

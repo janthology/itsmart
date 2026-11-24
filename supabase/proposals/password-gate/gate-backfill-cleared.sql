@@ -1,5 +1,6 @@
 -- Trusted password gate, step 3.2a (data): give existing accounts a cleared gate row.
--- PREPARED, NOT APPLIED. Requires separate approval. Not part of step 3.3.
+-- APPLIED to production as migration 20261124020959 (approved 2026-11-24, "3.2a first, then 3.3").
+-- Not part of step 3.3.
 -- Rollback: supabase/proposals/password-gate/gate-backfill-cleared-rollback.sql
 --
 -- Why: 14 of 15 profiles have no password_gate_state row (checked 2026-11-24, read-only).

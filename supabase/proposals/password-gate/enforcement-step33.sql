@@ -1,5 +1,5 @@
 -- Trusted password gate, Phase 3 step 3.3: gate-aware helpers and restrictive scope policies.
--- PREPARED, NOT APPLIED. Requires separate approval and the migration path.
+-- APPLIED to production as migration 20261124021030 (approved 2026-11-24). Settings stay 'shadow'.
 -- Rollback: supabase/proposals/password-gate/enforcement-step33-rollback.sql
 -- Depends on: schema-step31.sql (applied 20261124012612) and grant-cleanup-addendum.sql (applied).
 -- Shadow period: skipped by the user's decision on 2026-11-24. This step is still inert
