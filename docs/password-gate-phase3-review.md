@@ -501,3 +501,39 @@ Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off 
 **Not covered here.** The restricted (flagged) rows of section 7 need usertest flagged again, which is a second production write that needs approval. The write rows (maintenance RPCs, ticket create) were not exercised. The Realtime delivery and the live signed-in run are still open.
 
 **Earlier note correction.** The probe in the first attempt showed "SUP t27 a26 p1…". The message was truncated, and the rerun with the role switch shows support sees 15 profiles, as the policy allows.
+
+## 22. Visibility decisions; usertest flagged again; script updated (2026-11-24)
+
+**Decisions from the user.**
+
+- General user: all tickets (product decision, migration `20261030000006`, kept), only assets assigned to them, and only their own profile.
+- Support: all tickets, all assets, and only their own profile.
+- Administrator: unchanged.
+- Flagging `usertest@gmail.com` again was approved and done: phase `cleared` → `required` under a new operation ID, `must_change_password` true, admitted rows removed (0). The user has to complete the password change in the app before the full general-user rows can run again.
+
+**Script updated** (`artifacts/itam/scripts/password-gate-signed-in-check.mjs`, syntax checked, not run live):
+
+- Support: all tickets and assets (counts match the administrator's), own profile only.
+- General user (full session): all tickets (count matches the administrator's), only assets assigned to the user (every returned row assigned to the user, count matches the administrator's), own profile only.
+- Flagged general user: unchanged (0 tickets, 0 assets, 0 notifications, own profile only).
+
+**Current production does not match these decisions yet.** A live run now will FAIL on:
+
+- General user: "only assets assigned to self" (26 assets visible; 0 are assigned to usertest).
+- General user and support: "other profiles not visible" / "reads own profile only" (15 profiles visible to each).
+
+These FAILs are the expected result until the visibility change is applied. They are the acceptance test for it.
+
+**Not yet applied: the visibility migration.** Profiles and assets need changes. The `password_gate_scope` policy on `profiles` is an ALL policy, so narrowing `profiles_select_authenticated` alone does not work: a full session still matches the gate policy and sees every row. The migration would split the gate policy by command, keeping writes unchanged.
+
+**Open decision before the migration.** The app reads other users' profiles in several places, so an own-profile-only rule blanks names:
+
+- Ticket requester and assignee names (embedded profile joins in `tickets.ts` and `shared.ts`).
+- Ticket comment author names (`ticket_comments` join).
+- Support-staff list for assigning tickets (`useGetSupportStaff`, `profiles` where role = support_staff). Support users could not assign to other staff.
+- Asset holder names for support (`assets` join).
+- Requester name search (`tickets.ts`, `profiles` ilike).
+
+Options: (a) a names-only directory (id, full name, role) that every active user can read, while email and other profile fields stay private; or (b) the strict rule, with the app changed to show "Unknown user" for other users and the staff list served another way. Option (a) departs from "should not see other profiles" in the strictest sense, so it needs the user's decision.
+
+**Also stale:** section 7's line "read another user's ticket: denied" is out of date (see the decision on all tickets).
