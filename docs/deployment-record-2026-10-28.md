@@ -142,3 +142,4 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - Added: `scope` on `password_gate_admitted_sessions` (default `full`, check constraint); `password_gate_admit_restricted_session` (SECURITY DEFINER, `service_role` only); `password_gate_settings` (one row, `shadow`); `password_gate_shadow_log` (empty).
 - No policy, helper or app change. Nothing reads the new objects yet, so this step does not change any access decision.
 - Rollback: `supabase/proposals/password-gate/schema-step31-rollback.sql`, not run. It refuses while restricted or shadow rows exist.
+- Decision 2026-11-24: the user chose to skip the Supabase support request for the `supabase_admin` default privileges. This is an accepted risk, recorded in the Phase 3 review (section 2). No detective check was added.
