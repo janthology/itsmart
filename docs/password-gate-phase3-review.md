@@ -458,3 +458,5 @@ Expected: every line PASS. A FAIL is a finding. Do not continue to 3.4 sign-off 
 **Not recorded here:** the individual attempt results, the correct-password-while-locked result, and the check after the lock expires. The `--lockout` run of the script has not been done. The lock runs out at 06:01:20 UTC.
 
 **Other results from the user, not recorded in detail.** Realtime (4.7) was reported as done, with no results sent. The signed-in role matrix (section 18, steps 1 to 3) has not been reported back. Both need results before they can be marked passed.
+
+**Update (2026-11-24), after the lock expired.** The user reports that the correct password for `usertest@gmail.com` signed in successfully after the lock ran out. A read-only check afterwards found no throttle row for that key, so the count is back to zero. The correct-password-while-locked result was not recorded separately. The role matrix (section 18, steps 1 to 3) was reported as done by the user; the script output has not been received, so no result is recorded for it yet.
