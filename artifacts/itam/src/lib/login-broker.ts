@@ -5,6 +5,7 @@
 
 const UNAVAILABLE = 'Sign-in is temporarily unavailable. Try again shortly.'
 const ACCOUNT_UNAVAILABLE = 'Account unavailable'
+const TOO_MANY_ATTEMPTS = 'Too many sign-in attempts. Wait a few minutes and try again.'
 
 export interface BrokerSession {
   access_token: string
@@ -45,5 +46,6 @@ export async function signInThroughBroker(email: string, password: string): Prom
   if (code === 'invalid_input') throw new Error('Enter your email and password.')
   if (code === 'login_failed') throw new Error('Invalid login credentials')
   if (code === 'account_unavailable') throw new Error(ACCOUNT_UNAVAILABLE)
+  if (code === 'too_many_attempts') throw new Error(TOO_MANY_ATTEMPTS)
   throw new Error(UNAVAILABLE)
 }

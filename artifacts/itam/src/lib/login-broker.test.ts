@@ -29,6 +29,11 @@ describe('signInThroughBroker (client)', () => {
     await expect(signInThroughBroker('a@b.test', 'x')).rejects.toThrow(/^Account unavailable$/)
   })
 
+  it('maps too_many_attempts (429) to a wait message, not to the generic unavailable text', async () => {
+    stubFetch(new Response(JSON.stringify({ code: 'too_many_attempts', retry_after: 600 }), { status: 429 }))
+    await expect(signInThroughBroker('a@b.test', 'x')).rejects.toThrow(/too many sign-in attempts/i)
+  })
+
   it('maps login_unavailable to a temporary-unavailable message', async () => {
     stubFetch(new Response(JSON.stringify({ code: 'login_unavailable' }), { status: 503 }))
     await expect(signInThroughBroker('a@b.test', 'x')).rejects.toThrow(/temporarily unavailable/i)

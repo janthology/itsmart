@@ -32,12 +32,14 @@ interface Scenario {
   gate?: unknown
   admit?: Response | Error
   logout?: Response | Error
+  lockCheck?: unknown
+  recordFailure?: Response | Error
 }
 
-interface Calls { urls: string[]; bodies: Record<string, unknown>[]; logouts: number }
+interface Calls { urls: string[]; bodies: Record<string, unknown>[]; logouts: number; throttle: string[]; throttleBodies: Record<string, unknown>[] }
 
 function load(scenario: Scenario): { handler: Handler; calls: Calls } {
-  const calls: Calls = { urls: [], bodies: [], logouts: 0 }
+  const calls: Calls = { urls: [], bodies: [], logouts: 0, throttle: [], throttleBodies: [] }
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
   const fetchMock = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = String(input)
@@ -58,6 +60,25 @@ function load(scenario: Scenario): { handler: Handler; calls: Calls } {
     }
     if (url.includes('/rest/v1/profiles')) return json(scenario.profile ?? [{ is_active: true }])
     if (url.includes('/rest/v1/password_gate_state')) return json({ message: 'permission denied for table password_gate_state' }, 401)
+    if (url.includes('/rest/v1/rpc/password_gate_login_check')) {
+      calls.throttle.push('check')
+      calls.throttleBodies.push(JSON.parse(String(init?.body)))
+      if (scenario.lockCheck instanceof Response) return scenario.lockCheck
+      if (scenario.lockCheck instanceof Error) throw scenario.lockCheck
+      return json('lockCheck' in scenario ? scenario.lockCheck : 0)
+    }
+    if (url.includes('/rest/v1/rpc/password_gate_login_failed')) {
+      calls.throttle.push('failed')
+      calls.throttleBodies.push(JSON.parse(String(init?.body)))
+      if (scenario.recordFailure instanceof Error) throw scenario.recordFailure
+      if (scenario.recordFailure instanceof Response) return scenario.recordFailure
+      return json(0)
+    }
+    if (url.includes('/rest/v1/rpc/password_gate_login_succeeded')) {
+      calls.throttle.push('succeeded')
+      calls.throttleBodies.push(JSON.parse(String(init?.body)))
+      return new Response(null, { status: 204 })
+    }
     if (url.includes('/rest/v1/rpc/password_gate_broker_state')) {
       if (scenario.gate instanceof Response) return scenario.gate
       return json(scenario.gate ?? [{ phase: 'cleared', operation_id: generation }])
@@ -75,7 +96,7 @@ function load(scenario: Scenario): { handler: Handler; calls: Calls } {
   const env: Record<string, string> = { SUPABASE_URL: 'https://synthetic.invalid', SUPABASE_SERVICE_ROLE_KEY: 'synthetic-service-key' }
   runInNewContext(script, {
     Deno: { serve: (fn: Handler) => { handler = fn }, env: { get: (key: string) => env[key] } },
-    fetch: fetchMock, Request, Response, URL, JSON, Date, console, crypto: webcrypto, atob, btoa, Buffer, Error,
+    fetch: fetchMock, Request, Response, URL, JSON, Date, console, crypto: webcrypto, TextEncoder, atob, btoa, Buffer, Error,
   })
   if (!handler) throw new Error('Function did not register a handler')
   return { handler, calls }
@@ -89,7 +110,7 @@ const post = (body: unknown) => new Request('https://synthetic.invalid/login-bro
 const creds = { email, password }
 // Admission RPCs only. The read of gate state is checked separately below.
 const rpcCalls = (calls: Calls) => calls.urls
-  .filter(u => u.includes('/rest/v1/rpc/') && !u.includes('/rpc/password_gate_broker_state'))
+  .filter(u => u.includes('/rest/v1/rpc/') && !u.includes('/rpc/password_gate_broker_state') && !u.includes('/rpc/password_gate_login_'))
   .map(u => u.split('/rpc/')[1])
 
 describe('login-broker: gate state is read through the service-only RPC', () => {
@@ -245,5 +266,97 @@ describe('login-broker: account state and admission', () => {
     const text = await (await handler(post(creds))).text()
     expect(text).not.toContain('synthetic-service-key')
     expect(text).not.toContain(password)
+  })
+})
+
+describe('login-broker: per-account lockout', () => {
+  const grantIndex = (calls: Calls) => calls.urls.findIndex(u => u.includes('/auth/v1/token?grant_type=password'))
+  const checkIndex = (calls: Calls) => calls.urls.findIndex(u => u.includes('/rpc/password_gate_login_check'))
+
+  it('checks the lock before the password is sent to GoTrue', async () => {
+    const { handler, calls } = load({})
+    expect((await handler(post(creds))).status).toBe(200)
+    expect(checkIndex(calls)).toBeGreaterThanOrEqual(0)
+    expect(checkIndex(calls)).toBeLessThan(grantIndex(calls))
+    expect(calls.throttle).toEqual(['check', 'succeeded'])
+  })
+
+  it('refuses a locked email with 429 even when the password is correct, and never calls GoTrue', async () => {
+    const { handler, calls } = load({ lockCheck: 540 })
+    const response = await handler(post(creds))
+    expect(response.status).toBe(429)
+    expect(response.headers.get('Retry-After')).toBe('540')
+    expect(await response.json()).toEqual({ code: 'too_many_attempts', retry_after: 540 })
+    expect(grantIndex(calls)).toBe(-1)
+    expect(calls.throttle).toEqual(['check'])
+    expect(calls.logouts).toBe(0)
+  })
+
+  it('fails closed with 503 when the lock check fails, and never calls GoTrue', async () => {
+    const { handler, calls } = load({ lockCheck: new Response('{"message":"down"}', { status: 500 }) })
+    expect((await handler(post(creds))).status).toBe(503)
+    expect(grantIndex(calls)).toBe(-1)
+  })
+
+  it('fails closed when the lock check returns something other than a whole number of seconds', async () => {
+    for (const bad of [-1, 'soon', null, 1.5, {}, [], true]) {
+      const { handler, calls } = load({ lockCheck: bad })
+      const response = await handler(post(creds))
+      expect(response.status, String(bad)).toBe(503)
+      expect(grantIndex(calls), String(bad)).toBe(-1)
+    }
+  })
+
+  it('fails closed when the lock check throws', async () => {
+    const { handler, calls } = load({ lockCheck: new Error('network') })
+    expect((await handler(post(creds))).status).toBe(503)
+    expect(grantIndex(calls)).toBe(-1)
+  })
+
+  it('counts a wrong password and still answers login_failed', async () => {
+    const { handler, calls } = load({ grant: new Response('{}', { status: 400 }) })
+    const response = await handler(post(creds))
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ code: 'login_failed' })
+    expect(calls.throttle).toEqual(['check', 'failed'])
+  })
+
+  it('still answers login_failed when recording the failure throws', async () => {
+    const { handler } = load({ grant: new Response('{}', { status: 400 }), recordFailure: new Error('network') })
+    const response = await handler(post(creds))
+    expect(response.status).toBe(401)
+    expect(await response.json()).toEqual({ code: 'login_failed' })
+  })
+
+  it('does not count a GoTrue server error as a wrong password', async () => {
+    const { handler, calls } = load({ grant: new Response('{}', { status: 500 }) })
+    expect((await handler(post(creds))).status).toBe(503)
+    expect(calls.throttle).toEqual(['check'])
+  })
+
+  it('clears the count after a correct password', async () => {
+    const { handler, calls } = load({})
+    expect((await handler(post(creds))).status).toBe(200)
+    expect(calls.throttle).toEqual(['check', 'succeeded'])
+  })
+
+  it('keys the throttle by a hash of the normalised email, and never sends the email to the throttle', async () => {
+    const first = load({})
+    await first.handler(post({ email: '  Synthetic@Example.TEST ', password }))
+    const second = load({})
+    await second.handler(post({ email: 'synthetic@example.test', password }))
+    const keyOf = (calls: Calls) => calls.throttleBodies.map(b => b.p_key)
+    expect(keyOf(first.calls)).toEqual(keyOf(second.calls))
+    for (const key of keyOf(first.calls)) expect(String(key)).toMatch(/^[0-9a-f]{64}$/)
+    const sent = JSON.stringify(first.calls.throttleBodies) + first.calls.urls.filter(u => u.includes('/rpc/password_gate_login_')).join(' ')
+    expect(sent.toLowerCase()).not.toContain('synthetic@')
+    expect(sent.toLowerCase()).not.toContain('example.test')
+  })
+
+  it('never returns the password or a token in a lockout response', async () => {
+    const { handler } = load({ lockCheck: 60 })
+    const text = await (await handler(post(creds))).text()
+    expect(text).not.toContain(password)
+    expect(text).not.toContain('access_token')
   })
 })

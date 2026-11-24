@@ -12,8 +12,11 @@
 //      session out (scope local), so no unadmitted token is returned.
 // The database re-checks the generation under a row lock during admission, so a reset
 // that starts at any point before admission makes the admission fail.
-// Not in this function, and still open: rate limiting and lockout, which GoTrue applies
-// only in part. Never log or return passwords, raw Auth responses, or service keys.
+// Per-account lockout (migration 20261124044000): 5 wrong passwords in 15 minutes lock the
+// email for 15 minutes. The lock is checked before the password goes to GoTrue, so a locked
+// email gets 429 even with the right password. The throttle key is a hash of the email.
+// If the throttle check itself fails, sign-in fails closed (503). Never log or return
+// passwords, raw Auth responses, service keys, or emails.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -67,6 +70,14 @@ function claimsFromToken(token: string): { sub: string; sessionId: string } | nu
 
 type Phase = 'cleared' | 'required' | 'changing' | 'resetting'
 
+const THROTTLE_HEADER = 'Retry-After'
+
+// SHA-256 hex of "login:" + the lowercased, trimmed email. No email is stored or sent to the database.
+async function throttleKeyFor(email: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`login:${email.trim().toLowerCase()}`))
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders })
   if (req.method !== 'POST') return jsonResponse(405, { code: 'method_not_allowed' })
@@ -92,6 +103,13 @@ Deno.serve(async (req: Request) => {
   const serviceHeaders = { apikey: key, Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }
   let accessToken: string | null = null
   let admitted = false
+  const throttleKey = await throttleKeyFor(email)
+  const throttleCall = (fn: string, body: Record<string, unknown>) => fetch(`${base}/rest/v1/rpc/${fn}`, {
+    method: 'POST',
+    headers: serviceHeaders,
+    redirect: 'error',
+    body: JSON.stringify(body),
+  })
 
   // Logs out the session that GoTrue issued, if it was not admitted. Best effort.
   const discardSession = async () => {
@@ -108,6 +126,20 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
+    // 0. Lockout. Checked before the password is sent anywhere. Fails closed.
+    const lockCheck = await throttleCall('password_gate_login_check', { p_key: throttleKey })
+    if (!lockCheck.ok) return jsonResponse(503, { code: 'login_unavailable' })
+    const lockedFor: unknown = await lockCheck.json()
+    if (typeof lockedFor !== 'number' || !Number.isInteger(lockedFor) || lockedFor < 0) {
+      return jsonResponse(503, { code: 'login_unavailable' })
+    }
+    if (lockedFor > 0) {
+      return new Response(JSON.stringify({ code: 'too_many_attempts', retry_after: lockedFor }), {
+        status: 429,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store', [THROTTLE_HEADER]: String(lockedFor) },
+      })
+    }
+
     // 1. Verify the password. A failed grant is 'login_failed' whatever the reason.
     const grant = await fetch(`${base}/auth/v1/token?grant_type=password`, {
       method: 'POST',
@@ -116,10 +148,13 @@ Deno.serve(async (req: Request) => {
       redirect: 'error',
     })
     if (!grant.ok) {
-      return jsonResponse(grant.status >= 500 ? 503 : 401, {
-        code: grant.status >= 500 ? 'login_unavailable' : 'login_failed',
-      })
+      if (grant.status >= 500) return jsonResponse(503, { code: 'login_unavailable' })
+      // Count the wrong password. A failure to record it does not change the answer.
+      try { await throttleCall('password_gate_login_failed', { p_key: throttleKey }) } catch { /* counted on the next attempt */ }
+      return jsonResponse(401, { code: 'login_failed' })
     }
+    // A correct password clears the count. Best effort: a failure here leaves the count in place.
+    try { await throttleCall('password_gate_login_succeeded', { p_key: throttleKey }) } catch { /* see above */ }
     const issued = await grant.json() as { access_token?: unknown; refresh_token?: unknown; user?: { id?: unknown } }
     if (typeof issued.access_token !== 'string' || !issued.access_token) return jsonResponse(503, { code: 'login_unavailable' })
     accessToken = issued.access_token

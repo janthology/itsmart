@@ -395,3 +395,22 @@ Accepted risk, not blocking: the `supabase_admin` default privileges (see sectio
 3. **Rate limiting and lockout (3.2).** Open. Not in the broker function.
 4. **Production build of the `register()` removal.** Not promoted.
 5. **Sign-ins from the broker.** Any session created outside the broker is denied from now on. Sessions were 0 at the flip, so nothing was cut off.
+
+## 17. Rate limiting and lockout; signed-in matrix and Realtime (2026-11-24)
+
+**Rate limiting and lockout: built, tested locally, not applied to production.**
+
+- Migration `supabase/migrations/20261124044000_password_gate_login_throttle.sql` (service-only table `password_gate_login_throttle`, functions `password_gate_login_check`, `password_gate_login_failed`, `password_gate_login_succeeded`). Rollback: `supabase/rollbacks/20261124044000_password_gate_login_throttle.sql`.
+- Rules: 5 wrong passwords in 15 minutes lock the email for 15 minutes. The lock is checked before the password goes to GoTrue, so a locked email gets 429 with `retry_after`, even with the right password. A correct password clears the count. After a lock expires, the count starts again. Keys are SHA-256 of `login:` + the lowercased, trimmed email. No email is stored or sent to the throttle.
+- `login-broker` (source updated, **not deployed**): the lock check runs first and fails closed (503) on any error or any reply that is not a whole number. Failed passwords are counted. A GoTrue 5xx is not counted.
+- Browser (`artifacts/itam/src/lib/login-broker.ts`): 429 `too_many_attempts` shows "Too many sign-in attempts. Wait a few minutes and try again." It needs a production frontend promotion.
+- Tests: `login-broker-edge.test.ts` (30, +11 for the lock), `password-gate-login-throttle.local.test.ts` (10, PGlite), `login-broker.test.ts` (+1). Full itam suite: 39 files, 411 tests. `tsc --noEmit` clean.
+- Trade-off, stated plainly: an attacker who knows an email can lock that account for 15 minutes by sending 5 wrong passwords. That is the cost of per-account lockout. It is limited to 15 minutes per window. There is no per-IP limit, because the Edge Function does not trust forwarded addresses (`security_sb_forwarded_for_enabled` is false).
+
+**Order of production steps (each needs its own approval).** 1. Apply the migration. 2. Deploy `login-broker` v3. Deploying v3 before the migration makes every sign-in return 503, because the lock check RPC does not exist. 3. Promote a frontend built from a commit at or after `639db96`. This brings in the 429 message and the removed `register()`.
+
+**Signed-in role matrix and Realtime check: not run by the assistant.** The sandbox cannot reach Supabase or the preview, and the assistant does not hold the dedicated accounts' passwords.
+
+- Role matrix: `artifacts/itam/scripts/password-gate-signed-in-check.mjs`. It signs in the three dedicated accounts through the broker and checks each row of section 7 that can be checked by reading: admin, support, general user, unadmitted direct sign-in, anon, and a wrong password. `--lockout` also runs the lockout check, which locks the general test account for 15 minutes. It only reads, and it prints no passwords or tokens. It was checked against a local mock of the API (13 checks pass in the mock, including the unadmitted case that must fail if enforcement is broken). It has not been run against live.
+- Still needed from you: run the script with the three accounts' credentials. The restricted-session rows of section 7 need a flagged dedicated account, and flagging one is a production write that needs approval.
+- Realtime check (4.7): not run. It needs a Realtime client subscribed as a session that has no business access, to `notifications` and `profiles`, while a business row changes. Expected: no business events reach a restricted or unadmitted session. The positive control is a full session receiving its own notification. It also needs a flagged dedicated account.
