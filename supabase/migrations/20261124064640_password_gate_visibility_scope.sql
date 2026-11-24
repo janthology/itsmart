@@ -11,7 +11,7 @@
 --
 -- The password_gate_scope policies are RESTRICTIVE, so the gate still applies on top of these
 -- permissive SELECT policies. Writes are unchanged.
--- Rollback: supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql
+-- Rollback: supabase/rollbacks/20261124064640_password_gate_visibility_scope.sql
 
 DROP POLICY IF EXISTS assets_select_authenticated ON public.assets;
 CREATE POLICY assets_select_scoped

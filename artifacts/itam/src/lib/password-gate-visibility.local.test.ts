@@ -4,12 +4,12 @@ import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { readdirSync, readFileSync } from 'node:fs';
 
-// Visibility scope (migration 20261124060000): assets, asset history and maintenance log.
+// Visibility scope (migration 20261124064640): assets, asset history and maintenance log.
 // Profiles and tickets stay as they are (every active user sees all profiles and tickets). Applied after every repository migration on a local
 // PostgreSQL in PGlite. Not GoTrue, PostgREST, Realtime or live Supabase.
 const migrationsDir = new URL('../../../../supabase/migrations/', import.meta.url);
-const rollbackFile = new URL('../../../../supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql', import.meta.url);
-const visibilityFile = '20261124060000_password_gate_visibility_scope.sql';
+const rollbackFile = new URL('../../../../supabase/rollbacks/20261124064640_password_gate_visibility_scope.sql', import.meta.url);
+const visibilityFile = '20261124064640_password_gate_visibility_scope.sql';
 const proposalsDir = new URL('../../../../supabase/proposals/password-gate/', import.meta.url);
 const proposal = (name: string) => readFileSync(new URL(name, proposalsDir), 'utf8');
 

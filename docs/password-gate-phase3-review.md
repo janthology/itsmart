@@ -541,8 +541,8 @@ Options: (a) a names-only directory (id, full name, role) that every active user
 ## 23. Visibility migration written and tested locally; not applied to production (2026-11-24)
 
 **Files.**
-- `supabase/migrations/20261124060000_password_gate_visibility_scope.sql`
-- `supabase/rollbacks/20261124060000_password_gate_visibility_scope.sql`
+- `supabase/migrations/20261124064640_password_gate_visibility_scope.sql`
+- `supabase/rollbacks/20261124064640_password_gate_visibility_scope.sql`
 - `artifacts/itam/src/lib/password-gate-visibility.local.test.ts` (12 tests, PGlite, applies every migration and the Step 3.3 proposals in production order, then enforce mode)
 
 **What it changes (SELECT only; writes are unchanged).**
@@ -578,7 +578,7 @@ The app change for these is a separate piece of work, and the open decision from
 - Support staff can assign tickets to other staff.
 - Unchanged from section 23: general users see only the assets assigned to them, and support staff and administrators see all assets. Every active user sees all tickets.
 
-**What changed in the migration (`20261124060000`, still not applied to production).** The profiles policy is no longer touched, so the existing `profiles_select_authenticated` (every active user sees all profiles) stays. The migration now only narrows assets, asset history and maintenance log. The rollback has been trimmed to match.
+**What changed in the migration (`20261124064640`, still not applied to production).** The profiles policy is no longer touched, so the existing `profiles_select_authenticated` (every active user sees all profiles) stays. The migration now only narrows assets, asset history and maintenance log. The rollback has been trimmed to match.
 
 **Name lookups.** The consequence listed in section 23 for profiles no longer applies, because profiles remain visible to every active user.
 
@@ -596,4 +596,18 @@ The app change for these is a separate piece of work, and the open decision from
 
 **Script (`password-gate-signed-in-check.mjs`).** The support and general-user rows now expect all profiles (count matches the administrator's). The general-user "own profile" row is renamed to "reads own profile", since it checks the user's own row. Syntax checked; not run live.
 
-**Still needed.** Approval to apply `20261124060000` to production. Until then the live script's general-user asset row and support row fail (section 22 explains which).
+**Still needed.** Approval to apply `20261124064640` to production. Until then the live script's general-user asset row and support row fail (section 22 explains which).
+
+## 25. Visibility migration applied to production (2026-11-24)
+
+**Approved by the user.** Applied to production as migration `20261124064640_password_gate_visibility_scope` (the file was renamed to match the version assigned at apply). Listed in the production migration history.
+
+**Applied policy changes (verified in `pg_policies`).**
+
+- `assets`: `assets_select_authenticated` replaced by `assets_select_scoped`. Active administrators and support staff see all assets. Other active users see only assets assigned to them.
+- `asset_history`: `asset_history_select_authenticated` replaced by `asset_history_select_scoped` (visible when the asset is visible).
+- `asset_maintenance_log`: `maintenance_log_select_authenticated` replaced by `maintenance_log_select_scoped` (visible when the asset is visible).
+- `profiles`: unchanged (`profiles_select_authenticated`: every active user sees all profiles).
+- Tickets: unchanged.
+
+**Rollback** (if the decision is withdrawn): `supabase/rollbacks/20261124064640_password_gate_visibility_scope.sql`.

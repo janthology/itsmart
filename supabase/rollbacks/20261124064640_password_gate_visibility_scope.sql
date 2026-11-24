@@ -1,4 +1,4 @@
--- Rollback for 20261124060000_password_gate_visibility_scope.sql.
+-- Rollback for 20261124064640_password_gate_visibility_scope.sql.
 -- Restores the previous permissive SELECT policies on assets, asset history and maintenance log
 -- (all active users see all of them). Run only if the visibility decision is withdrawn.
 
