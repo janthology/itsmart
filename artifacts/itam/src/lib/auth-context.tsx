@@ -13,7 +13,6 @@ interface AuthContextType {
   isAuthenticated: boolean;
   mustChangePassword: boolean;
   login: (data: { email: string; password: string }) => Promise<void>;
-  register: (data: { email: string; password: string; fullName: string; department?: string }) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   clearMustChangePassword: () => void;
@@ -203,35 +202,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const register = async ({ email, password, fullName, department }: {
-    email: string; password: string; fullName: string; department?: string;
-  }) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName, department: department ?? null } },
-    });
-    if (error) {
-      toast({ variant: "destructive", title: "Registration failed", description: error.message });
-      throw error;
-    }
-    if (data.user) {
-      const userId = data.user.id;
-      void (async () => {
-        const { error: profileError } = await supabase.from('profiles').upsert({
-          id: userId,
-          full_name: fullName,
-          department: department ?? null,
-          role: 'general_user',
-        }, { onConflict: 'id' });
-        if (profileError) {
-          console.error('[register] profile upsert failed:', profileError);
-        }
-      })();
-    }
-    toast({ title: "Account created", description: "Welcome to ITAM." });
-  };
-
   const logout = async () => {
     await supabase.auth.signOut();
   };
@@ -247,7 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearMustChangePassword = () => setMustChangePassword(false);
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, mustChangePassword, login, register, logout, refreshUser, clearMustChangePassword }}>
+    <AuthContext.Provider value={{ user, isLoading, isAuthenticated: !!user, mustChangePassword, login, logout, refreshUser, clearMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );
