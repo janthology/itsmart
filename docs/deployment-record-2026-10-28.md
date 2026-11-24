@@ -135,3 +135,10 @@ Rollback restores the known gaps listed above (password set before flag; no self
 - `authenticated` lost table-level INSERT on `profiles` and has column INSERT on `id, full_name, role, department, avatar_url, created_at, updated_at, is_active` only. The two flag columns have no INSERT or UPDATE for `authenticated`.
 - Snapshot: `private.grant_cleanup_addendum_snapshot` (42 rows). Rollback: `supabase/proposals/password-gate/grant-cleanup-addendum-rollback.sql`, not run.
 - Open: `supabase_admin` default privileges for public tables still grant `arwdDxtm` to `anon` and `authenticated` (see the Phase 3 review).
+
+## Update 2026-11-24: step 3.1 schema applied (shadow mode, no enforcement)
+
+- Migration `20261124012612 password_gate_schema_step31`, applied with `create_migration` after the user approved it as written. The migration tool returned no version; it was verified in `supabase_migrations.schema_migrations`.
+- Added: `scope` on `password_gate_admitted_sessions` (default `full`, check constraint); `password_gate_admit_restricted_session` (SECURITY DEFINER, `service_role` only); `password_gate_settings` (one row, `shadow`); `password_gate_shadow_log` (empty).
+- No policy, helper or app change. Nothing reads the new objects yet, so this step does not change any access decision.
+- Rollback: `supabase/proposals/password-gate/schema-step31-rollback.sql`, not run. It refuses while restricted or shadow rows exist.

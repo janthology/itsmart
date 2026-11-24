@@ -1,5 +1,6 @@
 -- Trusted password gate, Phase 3 step 3.1: schema only.
--- PREPARED, NOT APPLIED. Requires separate approval and the migration path.
+-- APPLIED to production as migration 20261124012612 (approved by the user, 2026-11-24).
+-- The applied body is this file's SQL. Only this header comment changed afterwards.
 -- Rollback: supabase/proposals/password-gate/schema-step31-rollback.sql
 --
 -- Adds, with no policy, helper or app change:
