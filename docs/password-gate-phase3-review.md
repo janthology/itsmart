@@ -693,3 +693,22 @@ The user ran the browser checks in the app and reports all three pass:
 ## 32. Lockout check closed: correct password accepted after expiry (user report, 2026-11-24)
 
 After the `usertest` lock expired (section 19), a sign-in with the correct password succeeded. This closes the post-expiry item for the lockout check.
+
+## 33. Write paths checked on production; role matrix and broker checks not run from the sandbox (2026-11-24)
+
+**Write paths (rolled-back probes on production, run as `authenticated` with claims).**
+
+| Actor | `record_asset_maintenance` | Own ticket insert | Ticket for another user |
+| --- | --- | --- | --- |
+| Administrator (full session) | ok | ok | ok |
+| Support staff (full session) | ok | ok | ok |
+| General user (full session) | refused (role check) | ok | refused |
+| Support staff, flagged (`required`, `password_change_only`) | refused (role check) | refused (RLS) | not run |
+
+**Not run:** the general user while flagged; and the other write functions `create_asset_with_history`, `return_asset_to_service`, `correct_asset_maintenance` and `update_asset_pm_schedule`. Their role checks follow the same pattern as the maintenance function.
+
+**Dependency to watch.** These write functions are SECURITY DEFINER, so they skip RLS, including the password-gate policies. The flagged support probe was refused because `get_my_role()` returns no role under a restricted session. If `get_my_role()` ever stops respecting the gate, flagged staff could write through these functions. This is recorded here as a dependency, not as a current failure.
+
+**Items not run from the sandbox.**
+- Signed-in role-matrix script (section 28): the sandbox cannot reach the Supabase API (HTTP `000`), and the test passwords are not held here. The user must run it.
+- `resetting` account refused with 403 (section 17): this is a broker HTTP response, so it needs a live sign-in. The local test covers the refusal logic. A live check needs `usertest` moved to `resetting`, which is a production write and needs approval.
