@@ -743,3 +743,25 @@ This matches the broker's refusal for a `resetting` account (`supabase/functions
 **Verified (read-only, same day).** Phase `cleared`, `must_change_password` false, 0 admitted sessions.
 
 **Still open.** The item 1 role-matrix run, which the user runs on their own machine. The general-user rows can now run without the flagged setting.
+
+## 37. Signed-in role matrix run: 16 passed, 0 failed (user run, 2026-11-25)
+
+The user ran `password-gate-signed-in-check.mjs` on their own machine, with `USER_FLAGGED` unset and `usertest` in `cleared`. Result: 16 passed, 0 failed, 2 notes.
+
+| Check | Result |
+| --- | --- |
+| Broker sign-in returns tokens (admin, support, user) | PASS (3) |
+| Admin reads tickets, assets and all profiles | PASS (3) |
+| Support reads all tickets, all assets and all profiles | PASS (3) |
+| General user reads all tickets and all profiles | PASS (2) |
+| General user sees only assigned assets | PASS (0 rows, 0 assigned) |
+| General user reads own profile | PASS |
+| Unadmitted session (no broker) sees no business rows | PASS |
+| Anon sees no business rows | PASS |
+| Wrong password returns `login_failed`, no tokens | PASS |
+
+**Notes.**
+1. The general-user asset check passed with 0 rows, because no assets are assigned to `usertest`. It shows that no assets are visible, but it does not show that assigned assets are visible. The UI check in section 31 covered that.
+2. The lockout was not run by the script. It was checked by hand in section 19, and the post-expiry sign-in in section 32.
+
+This closes item 1 of the open list in section 33.
