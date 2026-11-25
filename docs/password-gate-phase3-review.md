@@ -722,3 +722,14 @@ After the `usertest` lock expired (section 19), a sign-in with the correct passw
 **Expected result.** A sign-in with `usertest`'s password is refused with HTTP 403 and returns no tokens. The user reports the exact message shown in the app.
 
 **Timing.** Phase 4 recovery moves a `resetting` account to `required` after 15 minutes of inactivity. If that happens before the check, `usertest` is flagged again and must change its password in the app. Restoring `cleared` after the check is a separate production write and needs its own approval, unless the user approves it with the result.
+
+## 35. Item 5 result: `resetting` account refused (user report, 2026-11-25)
+
+The user signed in as `usertest` in the app and saw: "Your account is unavailable. Please contact an administrator."
+
+This matches the broker's refusal for a `resetting` account (`supabase/functions/login-broker/index.ts`, lines 222 to 224): HTTP 403 with `account_unavailable`, and no tokens. Inactive accounts get the same response.
+
+**State at 05:02:20 UTC (read-only check).** `usertest` is still `resetting` (set 03:11:03 UTC). The 15-minute recovery did not move it to `required`, so the account cannot sign in until it is restored.
+
+**Still needed.**
+- A production write to restore `usertest` from `resetting` to `cleared`. It needs its own approval. Only then can the item 1 role-matrix run use the general-user rows.
