@@ -15,10 +15,12 @@ interface BrandLockupProps {
   className?: string;
 }
 
+// md is the app header (floating-nav). Its wordmark is larger and sits closer
+// to the logo and the eyebrow so the lockup reads as one unit.
 const SIZES = {
-  sm: { img: "h-8 w-8", eyebrow: "text-[9px]", title: "text-lg", gap: "gap-2.5" },
-  md: { img: "h-10 w-10", eyebrow: "text-[10px]", title: "text-xl", gap: "gap-3" },
-  lg: { img: "h-16 w-16", eyebrow: "text-[11px]", title: "text-4xl", gap: "gap-3.5" },
+  sm: { img: "h-8 w-8", eyebrow: "text-[9px]", title: "text-lg", gap: "gap-2.5", stack: "mt-1" },
+  md: { img: "h-10 w-10", eyebrow: "text-[10px]", title: "text-2xl", gap: "gap-2", stack: "mt-0.5" },
+  lg: { img: "h-16 w-16", eyebrow: "text-[11px]", title: "text-4xl", gap: "gap-3.5", stack: "mt-1" },
 } as const;
 
 export function BrandLockup({ tone = "auto", size = "md", className }: BrandLockupProps) {
@@ -52,7 +54,8 @@ export function BrandLockup({ tone = "auto", size = "md", className }: BrandLock
         </span>
         <span
           className={cn(
-            "mt-1 block font-display font-bold tracking-tight",
+            "block font-display font-bold tracking-tight",
+            s.stack,
             s.title,
             dark ? "text-white" : "text-foreground"
           )}
