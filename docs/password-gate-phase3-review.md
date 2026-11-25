@@ -712,3 +712,13 @@ After the `usertest` lock expired (section 19), a sign-in with the correct passw
 **Items not run from the sandbox.**
 - Signed-in role-matrix script (section 28): the sandbox cannot reach the Supabase API (HTTP `000`), and the test passwords are not held here. The user must run it.
 - `resetting` account refused with 403 (section 17): this is a broker HTTP response, so it needs a live sign-in. The local test covers the refusal logic. A live check needs `usertest` moved to `resetting`, which is a production write and needs approval.
+
+## 34. Live check: `resetting` account refused (approved, 2026-11-25)
+
+**Approved by the user.** Move `usertest@gmail.com` to `resetting` for a live sign-in check. This is a production write.
+
+**Change made (03:11:03 UTC).** Phase `cleared` changed to `resetting`, under a new operation ID. No admitted sessions existed to remove. `must_change_password` unchanged (false).
+
+**Expected result.** A sign-in with `usertest`'s password is refused with HTTP 403 and returns no tokens. The user reports the exact message shown in the app.
+
+**Timing.** Phase 4 recovery moves a `resetting` account to `required` after 15 minutes of inactivity. If that happens before the check, `usertest` is flagged again and must change its password in the app. Restoring `cleared` after the check is a separate production write and needs its own approval, unless the user approves it with the result.
