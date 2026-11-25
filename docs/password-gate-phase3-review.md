@@ -733,3 +733,13 @@ This matches the broker's refusal for a `resetting` account (`supabase/functions
 
 **Still needed.**
 - A production write to restore `usertest` from `resetting` to `cleared`. It needs its own approval. Only then can the item 1 role-matrix run use the general-user rows.
+
+## 36. usertest restored to cleared (approved, 2026-11-25)
+
+**Approved by the user.** Restore `usertest@gmail.com` from `resetting` to `cleared`.
+
+**Change made (06:22 UTC).** Phase `resetting` changed to `cleared`, under a new operation ID. `must_change_password` is false. There are no admitted sessions. The next sign-in creates one.
+
+**Verified (read-only, same day).** Phase `cleared`, `must_change_password` false, 0 admitted sessions.
+
+**Still open.** The item 1 role-matrix run, which the user runs on their own machine. The general-user rows can now run without the flagged setting.
