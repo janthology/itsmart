@@ -1,5 +1,7 @@
 # Trusted password gate, Phase 3: enforcement (review package, not applied)
 
+> **Current status (2026-11-25): see section 38.** Sections 12 to 23 were written before enforcement, Phase 4 recovery, the throttle and the visibility migration were applied. Where they say "not applied", "not flipped" or "open", section 38 is the current record.
+
 Status (2026-11-23): **document only. Nothing in this package has been applied, deployed, or approved.** No production object was changed. The live checks below were read-only catalog queries on `rkwxdqludtdzbpuftsvi`. Phase 3 is the first step that changes what users can read and write, so it needs the decisions in "Decisions needed" before any SQL is written for production.
 
 Parent documents: `docs/trusted-password-gate-review.md` (phases), `docs/trusted-password-gate-design.md` (requirements), `docs/password-gate-phase1-review.md` (applied infrastructure), `docs/password-gate-phase2-review.md` (deployed handlers).
@@ -765,3 +767,38 @@ The user ran `password-gate-signed-in-check.mjs` on their own machine, with `USE
 2. The lockout was not run by the script. It was checked by hand in section 19, and the post-expiry sign-in in section 32.
 
 This closes item 1 of the open list in section 33.
+
+## 38. Current status and decisions (2026-11-25)
+
+This section supersedes the stale status lines in sections 12 to 23 and the open-item lists in sections 17 to 37.
+
+**Applied to production**
+- Enforcement: `password_gate_settings.mode = enforce` (since 04:19 UTC, 2026-11-24).
+- Phase 4 recovery: migration `20261124041528`.
+- Login throttle: migration `20261124051703`, with `login-broker` v3.
+- Broker state read: migration `20261124032732` (`password_gate_broker_state`).
+- Visibility scope: migration `20261124064640`. General users and support staff see all profiles. Assets, asset history and maintenance log follow the asset rule.
+- Frontend: Vercel production `dpl_8s7jcFURD7PjMbKM2GVWinmURd6k` from `4944fbe`, READY and PROMOTED. No app code has changed since, so no redeploy is needed.
+
+**Checks completed**
+- Signed-in role matrix: 16 passed, 0 failed (section 37).
+- Wrong password: refused with no tokens (section 37).
+- Inactive account: cannot sign in or access (user report).
+- Restricted route: a flagged account reaches only the change-password screen (user report).
+- `resetting` account: refused with `account_unavailable` (section 35).
+- Lockout: correct password accepted after expiry (section 32).
+- Realtime: 20 of 20 (user report; no business events reach a restricted session).
+- UI: support reassignment, names visible to general users and support, assets by role (section 31).
+- Write paths, database layer (section 33): flagged support refused for maintenance and ticket writes. The general-user write refusal for a flagged account is confirmed by the user.
+
+**Decisions accepted**
+1. **Login throttle is per email only.** No per-IP or global limit. Accepted by the user.
+2. **Stuck accounts are reset by an administrator.** Phase 4 recovery did not move `usertest` from `resetting` to `required` after 15 minutes, so recovery is not relied on. Accepted by the user.
+3. **Gate dependency.** The asset write functions are SECURITY DEFINER and skip RLS. Their role lookup returns nothing under a restricted session, which is what currently stops flagged staff. Accepted by the user as a watch item. Re-check whenever `get_my_role()` or those functions change.
+
+**Not run, by the user's decision**
+- Asset write functions: create asset, return to service, correct maintenance record, update PM schedule.
+- Flagged general-user write, run by the assistant. The user confirmed it.
+
+**Open items**
+- None that block use. The watch item in decision 3 stays open for future changes.
