@@ -26,7 +26,20 @@ export function BrandLockup({ tone = "auto", size = "md", className }: BrandLock
   const dark = tone === "dark";
   return (
     <span className={cn("flex items-center", s.gap, className)}>
-      <img src="/dostlogo.png" alt="DOST" className={cn("shrink-0 object-contain", s.img)} />
+      {/* Light mode: soft shadow lifts the logo off light backgrounds.
+          Dark mode (and the always-dark login panel): white halo outlines the
+          black parts of the logo so the shape stays visible. */}
+      <img
+        src="/dostlogo.png"
+        alt="DOST"
+        className={cn(
+          "shrink-0 object-contain",
+          s.img,
+          dark
+            ? "[filter:drop-shadow(0_0_1px_rgba(255,255,255,0.9))_drop-shadow(0_0_6px_rgba(255,255,255,0.35))]"
+            : "[filter:drop-shadow(0_2px_4px_rgba(15,23,42,0.3))] dark:[filter:drop-shadow(0_0_1px_rgba(255,255,255,0.9))_drop-shadow(0_0_6px_rgba(255,255,255,0.35))]"
+        )}
+      />
       <span className="min-w-0 leading-none">
         <span
           className={cn(
