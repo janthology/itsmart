@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Plus, Loader2, MonitorSmartphone, PackagePlus } from "lucide-react";
 import { AssetSummaryStrip } from "@/components/assets/asset-summary-strip";
+import { canViewAllAssets } from "@/lib/asset-scope";
 import { AssetInventoryList } from "@/components/assets/asset-inventory-list";
 import { AssetToolbar } from "@/components/assets/asset-toolbar";
 import { z } from "zod";
@@ -45,14 +46,18 @@ const createAssetSchema = z.object({
 export default function AssetsList() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'administrator';
+  const canViewAll = canViewAllAssets(user?.role);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [scope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
-  const [assignedToFilter, setAssignedToFilter] = useState<string | undefined>(undefined);
+  const [requestedScope, setScope] = useState<"mine" | "all">(isAdmin ? "all" : "mine");
+  const [requestedAssignedTo, setAssignedToFilter] = useState<string | undefined>(undefined);
+  // General users only ever see their own assets, whatever the URL or toolbar asks for.
+  const scope = canViewAll ? requestedScope : "mine";
+  const assignedToFilter = canViewAll ? requestedAssignedTo : undefined;
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [createSuccess, setCreateSuccess] = useState(false);
@@ -262,16 +267,18 @@ export default function AssetsList() {
               >
                 My assets
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setScope("all");
-                  setAssignedToFilter(undefined);
-                }}
-                className={`rounded-xl px-4 py-2 text-xs font-semibold transition-all ${scope === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-              >
-                All assets
-              </button>
+              {canViewAll && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setScope("all");
+                    setAssignedToFilter(undefined);
+                  }}
+                  className={`rounded-xl px-4 py-2 text-xs font-semibold transition-all ${scope === "all" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  All assets
+                </button>
+              )}
             </div>
             {isAdmin && (
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
@@ -375,6 +382,7 @@ export default function AssetsList() {
             {...summary}
             statusFilter={statusFilter}
             onStatusFilter={setStatusFilter}
+            showAllStatus={canViewAll}
           />
 
           <div className="min-w-0 space-y-4">
@@ -382,7 +390,7 @@ export default function AssetsList() {
               search={search}
               onSearchChange={(value) => {
                 setSearch(value);
-                if (value && !isAdmin) setScope("all");
+                if (value && canViewAll && !isAdmin) setScope("all");
               }}
               categoryFilter={categoryFilter}
               onCategoryChange={setCategoryFilter}

@@ -10,6 +10,8 @@ interface AssetSummaryStripProps {
   retired: number;
   statusFilter: string;
   onStatusFilter: (status: string) => void;
+  /** False for general users: the "All assets" row is hidden, and clicking the selected status clears it. */
+  showAllStatus?: boolean;
 }
 
 const FILTERS = [
@@ -35,9 +37,11 @@ export function AssetSummaryStrip({
   retired,
   statusFilter,
   onStatusFilter,
+  showAllStatus = true,
 }: AssetSummaryStripProps) {
   const counts = { total, active, inactive, maintenance, retired };
   const activePct = total > 0 ? Math.round((active / total) * 100) : 0;
+  const visibleFilters = showAllStatus ? FILTERS : FILTERS.filter((f) => f.key !== "all");
 
   return (
     <aside className="app-sidebar-panel flex flex-col gap-4 p-5 lg:sticky lg:top-24 lg:self-start">
@@ -93,13 +97,13 @@ export function AssetSummaryStrip({
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Filter by status
         </p>
-        {FILTERS.map(({ key, label, field, dot, icon: Icon }) => {
+        {visibleFilters.map(({ key, label, field, dot, icon: Icon }) => {
           const selected = statusFilter === key;
           return (
             <button
               key={key}
               type="button"
-              onClick={() => onStatusFilter(key)}
+              onClick={() => onStatusFilter(!showAllStatus && selected ? "all" : key)}
               className={cn(
                 "flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition-all",
                 selected
